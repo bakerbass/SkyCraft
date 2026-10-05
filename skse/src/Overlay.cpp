@@ -9,21 +9,30 @@ namespace skycraft
 		using PresentFn = HRESULT(WINAPI*)(IDXGISwapChain*, UINT, UINT);
 		PresentFn originalPresent = nullptr;
 
+		// One composited picture: Minecraft's GUI, or MW2's gun and HUD.
+		struct Layer
+		{
+			const char*               name;
+			ID3D11Texture2D*          texture = nullptr;
+			ID3D11ShaderResourceView* srv = nullptr;
+			UINT                      w = 0, h = 0;
+			bool                      haveFrame = false;
+		};
+
 		ID3D11Device*             device = nullptr;
 		ID3D11DeviceContext*      context = nullptr;
-		ID3D11Texture2D*          texture = nullptr;
-		ID3D11ShaderResourceView* srv = nullptr;
-		UINT                      texW = 0, texH = 0;
+		Layer                     mcLayer{ "overlay" };
+		Layer                     mw2Layer{ "MW2 overlay" };
 		ID3D11VertexShader*       vs = nullptr;
 		ID3D11PixelShader*        ps = nullptr;
 		ID3D11PixelShader*        psInvert = nullptr;
 		ID3D11BlendState*         blend = nullptr;
 		ID3D11BlendState*         invertBlend = nullptr;
-		ID3D11SamplerState*       sampler = nullptr;
+		ID3D11SamplerState*       sampler = nullptr;        // point: Minecraft's GUI pixels stay crisp
+		ID3D11SamplerState*       linearSampler = nullptr;  // the MW2 layer may be rendered smaller
 		ID3D11RasterizerState*    raster = nullptr;
 		ID3D11DepthStencilState*  depth = nullptr;
 		ID3D11Buffer*             params = nullptr;
-		bool                      haveFrame = false;
 		bool                      flipY = true;
 		bool                      initFailed = false;
 
@@ -142,6 +151,8 @@ float4 PSMain(VSOut i) : SV_Target {
 			sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
 			sd.MaxLOD = D3D11_FLOAT32_MAX;
 			device->CreateSamplerState(&sd, &sampler);
+			sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+			device->CreateSamplerState(&sd, &linearSampler);
 
 			D3D11_RASTERIZER_DESC rd{};
 			rd.FillMode = D3D11_FILL_SOLID;
@@ -161,19 +172,19 @@ float4 PSMain(VSOut i) : SV_Target {
 			cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 			device->CreateBuffer(&cbd, nullptr, &params);
 
-			const bool ok = vs && ps && psInvert && blend && invertBlend && sampler && raster && depth && params;
+			const bool ok = vs && ps && psInvert && blend && invertBlend && sampler && linearSampler && raster && depth && params;
 			logger::info("overlay renderer {}", ok ? "ready" : "failed to initialize");
 			initFailed = !ok;
 			return ok;
 		}
 
-		bool EnsureTexture(UINT a_w, UINT a_h)
+		bool EnsureTexture(Layer& a_layer, UINT a_w, UINT a_h)
 		{
-			if (texture && texW == a_w && texH == a_h) {
+			if (a_layer.texture && a_layer.w == a_w && a_layer.h == a_h) {
 				return true;
 			}
-			SafeRelease(srv);
-			SafeRelease(texture);
+			SafeRelease(a_layer.srv);
+			SafeRelease(a_layer.texture);
 			D3D11_TEXTURE2D_DESC td{};
 			td.Width = a_w;
 			td.Height = a_h;
@@ -184,13 +195,37 @@ float4 PSMain(VSOut i) : SV_Target {
 			td.Usage = D3D11_USAGE_DYNAMIC;
 			td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 			td.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-			if (FAILED(device->CreateTexture2D(&td, nullptr, &texture)) || FAILED(device->CreateShaderResourceView(texture, nullptr, &srv))) {
-				logger::error("overlay texture {}x{} creation failed", a_w, a_h);
+			if (FAILED(device->CreateTexture2D(&td, nullptr, &a_layer.texture)) || FAILED(device->CreateShaderResourceView(a_layer.texture, nullptr, &a_layer.srv))) {
+				logger::error("{} texture {}x{} creation failed", a_layer.name, a_w, a_h);
 				return false;
 			}
-			texW = a_w;
-			texH = a_h;
-			logger::info("overlay texture {}x{}", a_w, a_h);
+			a_layer.w = a_w;
+			a_layer.h = a_h;
+			logger::info("{} texture {}x{}", a_layer.name, a_w, a_h);
+			return true;
+		}
+
+		// Copies a frame (RGBA8, top-down rows of width * 4 bytes) into the layer's texture.
+		bool Upload(Layer& a_layer, const std::uint8_t* a_src, UINT a_w, UINT a_h, UINT a_maxW, UINT a_maxH)
+		{
+			if (a_w == 0 || a_h == 0 || a_w > a_maxW || a_h > a_maxH || !EnsureTexture(a_layer, a_w, a_h)) {
+				return false;
+			}
+			D3D11_MAPPED_SUBRESOURCE mapped{};
+			if (FAILED(context->Map(a_layer.texture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+				return false;
+			}
+			const auto rowBytes = a_w * 4;
+			auto*      dst = static_cast<std::uint8_t*>(mapped.pData);
+			if (mapped.RowPitch == rowBytes) {
+				std::memcpy(dst, a_src, std::size_t(rowBytes) * a_h);
+			} else {
+				for (UINT y = 0; y < a_h; ++y) {
+					std::memcpy(dst + std::size_t(y) * mapped.RowPitch, a_src + std::size_t(y) * rowBytes, rowBytes);
+				}
+			}
+			context->Unmap(a_layer.texture, 0);
+			a_layer.haveFrame = true;
 			return true;
 		}
 
@@ -201,29 +236,18 @@ float4 PSMain(VSOut i) : SV_Target {
 				return;
 			}
 			const auto* hdr = link.FrontHeader();
-			if (hdr->width == 0 || hdr->height == 0 || hdr->width > proto::kMaxOverlayW || hdr->height > proto::kMaxOverlayH) {
+			if (Upload(mcLayer, link.FrontPixels(), hdr->width, hdr->height, proto::kMaxOverlayW, proto::kMaxOverlayH)) {
+				flipY = (hdr->flags & 1) != 0;
+			}
+		}
+
+		void UploadLatestMw2Frame()
+		{
+			if (!Mw2::AcquireOverlayFrame()) {
 				return;
 			}
-			if (!EnsureTexture(hdr->width, hdr->height)) {
-				return;
-			}
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			if (FAILED(context->Map(texture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-				return;
-			}
-			const auto* src = link.FrontPixels();
-			const auto  rowBytes = hdr->width * 4;
-			auto*       dst = static_cast<std::uint8_t*>(mapped.pData);
-			if (mapped.RowPitch == rowBytes) {
-				std::memcpy(dst, src, std::size_t(rowBytes) * hdr->height);
-			} else {
-				for (UINT y = 0; y < hdr->height; ++y) {
-					std::memcpy(dst + std::size_t(y) * mapped.RowPitch, src + std::size_t(y) * rowBytes, rowBytes);
-				}
-			}
-			context->Unmap(texture, 0);
-			flipY = (hdr->flags & 1) != 0;
-			haveFrame = true;
+			const auto* hdr = Mw2::FrontHeader();
+			Upload(mw2Layer, Mw2::FrontPixels(), hdr->width, hdr->height, mw2::kMaxOverlayW, mw2::kMaxOverlayH);
 		}
 
 		void DrawOverlay(IDXGISwapChain* a_swapChain)
@@ -234,11 +258,20 @@ float4 PSMain(VSOut i) : SV_Target {
 				st.viewportW = static_cast<int>(desc.BufferDesc.Width);
 				st.viewportH = static_cast<int>(desc.BufferDesc.Height);
 			}
+			Mw2::WriteHeader(static_cast<std::uint32_t>(st.viewportW), static_cast<std::uint32_t>(st.viewportH));
 			if (!Link::Get().Valid() || !Link::Get().McAlive() || !st.mcInWorld || !InitResources(a_swapChain)) {
 				return;
 			}
 			UploadLatestFrame();
-			if (!haveFrame || st.skyrimMenuOpen) {
+			const bool drawMc = mcLayer.haveFrame && !st.skyrimMenuOpen;
+			// MW2's gun, under Minecraft's hotbar and screens. Until Minecraft says which gun is held
+			// (Mw2Control), it shows whenever the guest's soldier is up and Minecraft drives the player.
+			bool drawMw2 = false;
+			if (Mw2::Enabled() && Mw2::GuestAlive() && Mw2::Ready() && st.puppeting && !st.skyrimMenuOpen) {
+				UploadLatestMw2Frame();
+				drawMw2 = mw2Layer.haveFrame;
+			}
+			if (!drawMc && !drawMw2) {
 				return;
 			}
 
@@ -291,13 +324,35 @@ float4 PSMain(VSOut i) : SV_Target {
 			context->PSGetSamplers(0, 1, &oldSampler);
 			context->PSGetConstantBuffers(0, 1, &oldCb);
 
-			bool                     invert = false;
+			D3D11_VIEWPORT vp{ 0, 0, float(bbDesc.Width), float(bbDesc.Height), 0, 1 };
+			const float    factor[4]{};
+			context->OMSetRenderTargets(1, &rtv, nullptr);
+			context->OMSetBlendState(blend, factor, 0xFFFFFFFF);
+			context->OMSetDepthStencilState(depth, 0);
+			context->RSSetState(raster);
+			context->RSSetViewports(1, &vp);
+			context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			context->IASetInputLayout(nullptr);
+			context->VSSetShader(vs, nullptr, 0);
+			context->PSSetShader(ps, nullptr, 0);
+			context->PSSetConstantBuffers(0, 1, &params);
+
 			D3D11_MAPPED_SUBRESOURCE mapped{};
-			if (SUCCEEDED(context->Map(params, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+			if (drawMw2 && SUCCEEDED(context->Map(params, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+				// Stretched over the back buffer as it is: no cursor, no flip, no invert pass.
+				*static_cast<Params*>(mapped.pData) = Params{ .viewport = { float(bbDesc.Width), float(bbDesc.Height) } };
+				context->Unmap(params, 0);
+				context->PSSetShaderResources(0, 1, &mw2Layer.srv);
+				context->PSSetSamplers(0, 1, &linearSampler);
+				context->Draw(3, 0);
+			}
+
+			bool invert = false;
+			if (drawMc && SUCCEEDED(context->Map(params, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 				auto* p = static_cast<Params*>(mapped.pData);
 				// The cursor lives in overlay pixels; scale if the overlay and back buffer differ.
-				const float sx = texW ? float(bbDesc.Width) / float(texW) : 1.0f;
-				const float sy = texH ? float(bbDesc.Height) / float(texH) : 1.0f;
+				const float sx = mcLayer.w ? float(bbDesc.Width) / float(mcLayer.w) : 1.0f;
+				const float sy = mcLayer.h ? float(bbDesc.Height) / float(mcLayer.h) : 1.0f;
 				p->cursor[0] = st.cursorX * sx;
 				p->cursor[1] = st.cursorY * sy;
 				p->viewport[0] = float(bbDesc.Width);
@@ -315,23 +370,10 @@ float4 PSMain(VSOut i) : SV_Target {
 				p->invertRect[2] = invert ? cx + 12.0f * g : 0.0f;
 				p->invertRect[3] = invert ? cy + 28.0f * g : 0.0f;
 				context->Unmap(params, 0);
+				context->PSSetShaderResources(0, 1, &mcLayer.srv);
+				context->PSSetSamplers(0, 1, &sampler);
+				context->Draw(3, 0);
 			}
-
-			D3D11_VIEWPORT vp{ 0, 0, float(bbDesc.Width), float(bbDesc.Height), 0, 1 };
-			const float    factor[4]{};
-			context->OMSetRenderTargets(1, &rtv, nullptr);
-			context->OMSetBlendState(blend, factor, 0xFFFFFFFF);
-			context->OMSetDepthStencilState(depth, 0);
-			context->RSSetState(raster);
-			context->RSSetViewports(1, &vp);
-			context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-			context->IASetInputLayout(nullptr);
-			context->VSSetShader(vs, nullptr, 0);
-			context->PSSetShader(ps, nullptr, 0);
-			context->PSSetShaderResources(0, 1, &srv);
-			context->PSSetSamplers(0, 1, &sampler);
-			context->PSSetConstantBuffers(0, 1, &params);
-			context->Draw(3, 0);
 			if (invert) {
 				context->OMSetBlendState(invertBlend, factor, 0xFFFFFFFF);
 				context->PSSetShader(psInvert, nullptr, 0);
