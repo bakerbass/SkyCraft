@@ -99,6 +99,7 @@ public final class SkyClient {
 			}
 		}
 		if (!linked) {
+			Mw2Client.frame(Minecraft.getInstance());
 			return;
 		}
 
@@ -112,6 +113,7 @@ public final class SkyClient {
 		}
 		InputBridge.drain(minecraft);
 		ProxySync.frame(minecraft);
+		Mw2Client.frame(minecraft);
 
 		LocalPlayer player = minecraft.player;
 		if (player == null) {

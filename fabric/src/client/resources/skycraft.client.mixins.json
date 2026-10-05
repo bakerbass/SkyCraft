@@ -15,6 +15,9 @@
     "LevelRendererMixin",
     "MinecraftDigMixin",
     "MinecraftMixin",
+    "Mw2HandMixin",
+    "Mw2HudMixin",
+    "Mw2InventoryMixin",
     "RenderSetupAccessor",
     "RenderTypeAccessor",
     "ScreenMixin",
@@ -26,5 +29,7 @@
     "WindowMixin",
     "WorldOpenFlowsMixin"
   ],
-  "injectors": { "defaultRequire": 1 }
+  "injectors": {
+    "defaultRequire": 1
+  }
 }

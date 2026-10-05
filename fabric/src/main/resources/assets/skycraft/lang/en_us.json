@@ -1,3 +1,6 @@
 {
-  "entity.skycraft.skyrim_actor": "Skyrim NPC"
+  "entity.skycraft.skyrim_actor": "Skyrim NPC",
+  "item.skycraft.mw2_intervention": "Intervention",
+  "item.skycraft.mw2_spas12": "SPAS-12",
+  "item.skycraft.mw2_ump45": "UMP45"
 }

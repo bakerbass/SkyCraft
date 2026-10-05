@@ -83,8 +83,25 @@ public final class SkyNet {
 		}
 	}
 
+	/** Client -> server: this player's Minecraft has MW2's guns on (its Skyrim runs the guest). */
+	public record RequestMw2Guns() implements CustomPacketPayload {
+		public static final RequestMw2Guns INSTANCE = new RequestMw2Guns();
+		public static final Type<RequestMw2Guns> TYPE = new Type<>(Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "request_mw2_guns"));
+		public static final StreamCodec<RegistryFriendlyByteBuf, RequestMw2Guns> CODEC = StreamCodec.unit(INSTANCE);
+
+		@Override
+		public Type<? extends CustomPacketPayload> type() {
+			return TYPE;
+		}
+	}
+
 	public static void init() {
 		PayloadTypeRegistry.serverboundPlay().register(Hurt.TYPE, Hurt.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestMw2Guns.TYPE, RequestMw2Guns.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(RequestMw2Guns.TYPE, (payload, context) -> {
+			ServerPlayer player = context.player();
+			context.server().execute(() -> dev.skycraft.mw2.Mw2Guns.giveMissing(player));
+		});
 		PayloadTypeRegistry.serverboundPlay().register(DigOpen.TYPE, DigOpen.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(DigReveal.TYPE, DigReveal.CODEC);
 		ServerPlayNetworking.registerGlobalReceiver(DigOpen.TYPE, (payload, context) -> {
