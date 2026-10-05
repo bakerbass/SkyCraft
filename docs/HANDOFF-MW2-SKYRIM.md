@@ -1,5 +1,8 @@
 # Handoff: MW2 guns in SkyCraft, the Skyrim side
 
+> **Done (2026-10-04).** S1–S5 are finished, and M3 (firing) is built too. What's next is in
+> [plan.md](plan.md).
+
 For the agent picking up the **SKSE plugin** work. Read [MW2.md](MW2.md) (the design) first, then
 this. Written 2026-10-04.
 
