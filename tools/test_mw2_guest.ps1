@@ -14,10 +14,9 @@ param(
 $ErrorActionPreference = "Stop"
 $hostProc = Start-Process python -ArgumentList @("$PSScriptRoot\fake_mw2_host.py", "$Seconds", "`"$Out`"", "$Width", "$Height") -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\fake_mw2_host.out"
 Start-Sleep 2
-$env:IW4L_GAMES = $Mw2
-$env:IW4L_SKYCRAFT = "1"
+# The same command line the Skyrim plugin uses (it can't pass environment variables).
 $dir = Split-Path $Iw4l
-$guest = Start-Process $Iw4l -ArgumentList @("map", "mp_rust", "--cmds", "`"$Cmds`"") -WorkingDirectory $dir -PassThru
+$guest = Start-Process $Iw4l -ArgumentList @("--skycraft", "--games", "`"$Mw2`"", "map", "mp_rust", "--cmds", "`"$Cmds`"") -WorkingDirectory $dir -PassThru
 $hostProc.WaitForExit()
 if (-not $guest.HasExited) { Stop-Process -Id $guest.Id -Force }
 Get-Content "$env:TEMP\fake_mw2_host.out"
