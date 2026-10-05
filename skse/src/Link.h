@@ -4,6 +4,9 @@
 
 namespace skycraft
 {
+	// Access rules for SkyCraft's shared memory: this Windows user at normal integrity, even when
+	// Skyrim runs as administrator. Free with LocalFree; null if they couldn't be built.
+	PSECURITY_DESCRIPTOR SharedWithThisUser();
 
 	// Owner of the shared-memory mapping (Skyrim creates it; Minecraft opens it).
 	class Link

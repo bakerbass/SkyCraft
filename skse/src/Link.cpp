@@ -26,36 +26,36 @@ namespace skycraft
 			::CloseHandle(token);
 			return ok && elevation.TokenIsElevated;
 		}
+	}
 
-		// Who may open the shared memory: this Windows user (and the system and administrators), at
-		// normal integrity. Said explicitly because a Skyrim run as administrator would otherwise
-		// make it administrators-only, and Minecraft (started through the desktop, so never
-		// elevated) couldn't open it: it would sit there hidden, never connecting. Free with LocalFree.
-		PSECURITY_DESCRIPTOR SharedWithThisUser()
-		{
-			std::wstring sddl = L"D:P(A;;GA;;;SY)(A;;GA;;;BA)";
-			HANDLE       token = nullptr;
-			if (::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token)) {
-				DWORD size = 0;
-				::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
-				std::vector<std::uint8_t> buffer(size);
-				if (size && ::GetTokenInformation(token, TokenUser, buffer.data(), size, &size)) {
-					LPWSTR sid = nullptr;
-					if (::ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(buffer.data())->User.Sid, &sid)) {
-						sddl += std::wstring(L"(A;;GA;;;") + sid + L")";
-						::LocalFree(sid);
-					}
+	// Who may open the shared memory: this Windows user (and the system and administrators), at
+	// normal integrity. Said explicitly because a Skyrim run as administrator would otherwise
+	// make it administrators-only, and Minecraft (started through the desktop, so never
+	// elevated) couldn't open it: it would sit there hidden, never connecting. Free with LocalFree.
+	PSECURITY_DESCRIPTOR SharedWithThisUser()
+	{
+		std::wstring sddl = L"D:P(A;;GA;;;SY)(A;;GA;;;BA)";
+		HANDLE       token = nullptr;
+		if (::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token)) {
+			DWORD size = 0;
+			::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+			std::vector<std::uint8_t> buffer(size);
+			if (size && ::GetTokenInformation(token, TokenUser, buffer.data(), size, &size)) {
+				LPWSTR sid = nullptr;
+				if (::ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(buffer.data())->User.Sid, &sid)) {
+					sddl += std::wstring(L"(A;;GA;;;") + sid + L")";
+					::LocalFree(sid);
 				}
-				::CloseHandle(token);
 			}
-			sddl += L"S:(ML;;NW;;;ME)";
-			PSECURITY_DESCRIPTOR descriptor = nullptr;
-			if (!::ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1, &descriptor, nullptr)) {
-				logger::warn("shared memory: couldn't build its access rules ({}); using the defaults", ::GetLastError());
-				return nullptr;
-			}
-			return descriptor;
+			::CloseHandle(token);
 		}
+		sddl += L"S:(ML;;NW;;;ME)";
+		PSECURITY_DESCRIPTOR descriptor = nullptr;
+		if (!::ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1, &descriptor, nullptr)) {
+			logger::warn("shared memory: couldn't build its access rules ({}); using the defaults", ::GetLastError());
+			return nullptr;
+		}
+		return descriptor;
 	}
 
 	Link& Link::Get()

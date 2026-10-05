@@ -39,53 +39,6 @@ namespace skycraft::Launcher
 			return n > 0 && n <= std::size(buf) ? std::wstring(buf) : a_path;
 		}
 
-		// Runs a program the way double-clicking it would: started by the desktop's Explorer, not by
-		// Skyrim. Under Mod Organizer that keeps Minecraft out of MO2's virtual file system and off
-		// the list of processes MO2 waits for (it stays locked until they've all exited).
-		bool OpenFromDesktop(const std::wstring& a_file, const std::wstring& a_args, const std::wstring& a_dir, int a_show)
-		{
-			using Microsoft::WRL::ComPtr;
-			ComPtr<IShellWindows> windows;
-			if (FAILED(::CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(&windows)))) {
-				return false;
-			}
-			VARIANT location{};
-			location.vt = VT_I4;
-			location.lVal = CSIDL_DESKTOP;
-			VARIANT           empty{};
-			long              hwnd = 0;
-			ComPtr<IDispatch> desktop;
-			if (FAILED(windows->FindWindowSW(&location, &empty, SWC_DESKTOP, &hwnd, SWFO_NEEDDISPATCH, &desktop)) || !desktop) {
-				return false;
-			}
-			ComPtr<IServiceProvider> services;
-			ComPtr<IShellBrowser>    browser;
-			ComPtr<IShellView>       view;
-			ComPtr<IDispatch>        background;
-			ComPtr<IShellFolderViewDual> folderView;
-			ComPtr<IDispatch>        application;
-			ComPtr<IShellDispatch2>  shell;
-			if (FAILED(desktop.As(&services)) || FAILED(services->QueryService(SID_STopLevelBrowser, IID_PPV_ARGS(&browser))) ||
-				FAILED(browser->QueryActiveShellView(&view)) || FAILED(view->GetItemObject(SVGIO_BACKGROUND, IID_PPV_ARGS(&background))) ||
-				FAILED(background.As(&folderView)) || FAILED(folderView->get_Application(&application)) || FAILED(application.As(&shell))) {
-				return false;
-			}
-			BSTR    file = ::SysAllocString(a_file.c_str());
-			VARIANT args{}, dir{}, operation{}, show{};
-			args.vt = dir.vt = operation.vt = VT_BSTR;
-			args.bstrVal = ::SysAllocString(a_args.c_str());
-			dir.bstrVal = ::SysAllocString(a_dir.c_str());
-			operation.bstrVal = ::SysAllocString(L"open");
-			show.vt = VT_I4;
-			show.lVal = a_show;
-			const HRESULT hr = shell->ShellExecute(file, args, dir, operation, show);
-			::SysFreeString(file);
-			::VariantClear(&args);
-			::VariantClear(&dir);
-			::VariantClear(&operation);
-			return SUCCEEDED(hr);
-		}
-
 		std::filesystem::path FindPrism()
 		{
 			for (const wchar_t* candidate : { L"%LOCALAPPDATA%\\Programs\\PrismLauncher\\prismlauncher.exe", L"%ProgramFiles%\\PrismLauncher\\prismlauncher.exe" }) {
@@ -207,6 +160,53 @@ namespace skycraft::Launcher
 			logger::info("Minecraft: started {} (directly)", a_shown);
 			return true;
 		}
+	}
+
+	// Runs a program the way double-clicking it would: started by the desktop's Explorer, not by
+	// Skyrim. Under Mod Organizer that keeps Minecraft out of MO2's virtual file system and off
+	// the list of processes MO2 waits for (it stays locked until they've all exited).
+	bool OpenFromDesktop(const std::wstring& a_file, const std::wstring& a_args, const std::wstring& a_dir, int a_show)
+	{
+		using Microsoft::WRL::ComPtr;
+		ComPtr<IShellWindows> windows;
+		if (FAILED(::CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(&windows)))) {
+			return false;
+		}
+		VARIANT location{};
+		location.vt = VT_I4;
+		location.lVal = CSIDL_DESKTOP;
+		VARIANT           empty{};
+		long              hwnd = 0;
+		ComPtr<IDispatch> desktop;
+		if (FAILED(windows->FindWindowSW(&location, &empty, SWC_DESKTOP, &hwnd, SWFO_NEEDDISPATCH, &desktop)) || !desktop) {
+			return false;
+		}
+		ComPtr<IServiceProvider> services;
+		ComPtr<IShellBrowser>    browser;
+		ComPtr<IShellView>       view;
+		ComPtr<IDispatch>        background;
+		ComPtr<IShellFolderViewDual> folderView;
+		ComPtr<IDispatch>        application;
+		ComPtr<IShellDispatch2>  shell;
+		if (FAILED(desktop.As(&services)) || FAILED(services->QueryService(SID_STopLevelBrowser, IID_PPV_ARGS(&browser))) ||
+			FAILED(browser->QueryActiveShellView(&view)) || FAILED(view->GetItemObject(SVGIO_BACKGROUND, IID_PPV_ARGS(&background))) ||
+			FAILED(background.As(&folderView)) || FAILED(folderView->get_Application(&application)) || FAILED(application.As(&shell))) {
+			return false;
+		}
+		BSTR    file = ::SysAllocString(a_file.c_str());
+		VARIANT args{}, dir{}, operation{}, show{};
+		args.vt = dir.vt = operation.vt = VT_BSTR;
+		args.bstrVal = ::SysAllocString(a_args.c_str());
+		dir.bstrVal = ::SysAllocString(a_dir.c_str());
+		operation.bstrVal = ::SysAllocString(L"open");
+		show.vt = VT_I4;
+		show.lVal = a_show;
+		const HRESULT hr = shell->ShellExecute(file, args, dir, operation, show);
+		::SysFreeString(file);
+		::VariantClear(&args);
+		::VariantClear(&dir);
+		::VariantClear(&operation);
+		return SUCCEEDED(hr);
 	}
 
 	Status GetStatus() { return status.load(); }
