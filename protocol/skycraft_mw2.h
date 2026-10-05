@@ -104,7 +104,8 @@ namespace skycraft::mw2
 
 	// ---- overlay triple buffer @0x300 (guest -> Skyrim) -------------------------------------
 	// Same scheme as the main protocol's overlay: state bits 0-1 = middle slot, bit 2 = dirty.
-	// Pixels are RGBA8, straight (not premultiplied) alpha, top-down rows of width * 4 bytes.
+	// Pixels are RGBA8 with premultiplied alpha (blend ONE, INV_SRC_ALPHA, like the main overlay),
+	// top-down rows of width * 4 bytes.
 	inline constexpr std::uint32_t kOverlayDirty = 1u << 2;
 
 	struct OverlayCtl
