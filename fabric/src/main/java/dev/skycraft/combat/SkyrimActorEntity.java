@@ -116,6 +116,24 @@ public class SkyrimActorEntity extends LivingEntity {
 		this.hitThisTick = true;
 	}
 
+	/**
+	 * One of MW2's bullets (Mw2Guns), in Minecraft damage: straight to Skyrim, without Minecraft's
+	 * armour or invulnerability frames between rapid shots. Heavy rounds stagger.
+	 */
+	public void gunHit(float damage, double dirX, double dirZ, boolean headshot) {
+		this.pendingDamage += damage;
+		this.pendingFlags |= Proto.HIT_PROJECTILE | (headshot ? Proto.HIT_CRITICAL : 0);
+		this.pendingWeapon = Proto.WEAPON_ARROW;
+		double len = Math.sqrt(dirX * dirX + dirZ * dirZ);
+		float push = Math.min(0.8F, damage / 40.0F);
+		if (len > 1e-6 && push > this.pushStrength) {
+			this.pushStrength = push;
+			this.pushX = dirX / len;
+			this.pushZ = dirZ / len;
+		}
+		this.hitThisTick = true;
+	}
+
 	/** Player.crit() was called on us this tick. */
 	public void markCritical() {
 		this.pendingFlags |= Proto.HIT_CRITICAL;

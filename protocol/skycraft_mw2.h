@@ -16,7 +16,7 @@
 namespace skycraft::mw2
 {
 	inline constexpr std::uint32_t kMagic = 0x4732574D;  // "MW2G"
-	inline constexpr std::uint32_t kVersion = 4;
+	inline constexpr std::uint32_t kVersion = 5;
 	inline constexpr wchar_t       kMappingName[] = L"Local\\SkyCraft_MW2_v1";
 
 	// ---- region offsets ---------------------------------------------------------------------
@@ -137,7 +137,9 @@ namespace skycraft::mw2
 	inline constexpr std::uint32_t kShotRingEntries = 256;  // power of two
 	inline constexpr std::uint32_t kHitRingEntries = 256;
 
-	// One bullet. A shotgun blast is one Shot per pellet with the same `blast` id.
+	// One bullet, as MW2 fired it. A shotgun blast is one Shot per pellet with the same `blast`
+	// id. Minecraft traces it from its player's eye (origin is informational): damage falls off
+	// linearly from damageRange to minDamageRange, then takes headMultiplier or bodyMultiplier.
 	struct Shot
 	{
 		std::uint32_t id;
@@ -152,7 +154,7 @@ namespace skycraft::mw2
 		float         damageRange;     // blocks: full damage up to here
 		float         minDamageRange;  // blocks: minDamage from here on, linear in between
 		float         headMultiplier;
-		float         pad4C;
+		float         bodyMultiplier;
 	};
 	static_assert(sizeof(Shot) == 0x50);
 

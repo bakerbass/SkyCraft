@@ -46,6 +46,7 @@ public final class Mw2Link {
 	private static int session;
 	private static int warnedVersion = -1;
 	private static float hotbarTop;
+	private static float fovScale = 1.0F;
 
 	private Mw2Link() {
 	}
@@ -135,9 +136,11 @@ public final class Mw2Link {
 			}
 			int flags = s.get(JAVA_INT, OFF_STATE + ST_FLAGS);
 			float top = s.get(JAVA_FLOAT, OFF_STATE + ST_HOTBAR_TOP);
+			float zoom = s.get(JAVA_FLOAT, OFF_STATE + ST_FOV_SCALE);
 			VarHandle.loadLoadFence();
 			if ((int) INT.getAcquire(s, OFF_STATE + ST_SEQ) == seq) {
 				hotbarTop = top;
+				fovScale = Float.isFinite(zoom) && zoom > 0.0F ? Math.min(zoom, 1.0F) : 1.0F;
 				return (flags & ST_READY) != 0;
 			}
 		}
@@ -147,6 +150,68 @@ public final class Mw2Link {
 	/** Where the guest's hotbar starts, as a fraction of the screen's height (0: not shown), as of guestReady. */
 	public static float hotbarTop() {
 		return hotbarTop;
+	}
+
+	/**
+	 * MW2's aim-down-sights zoom as of guestReady: the tangent of the half field of view now over
+	 * unzoomed (1 at the hip).
+	 */
+	public static float fovScale() {
+		return fovScale;
+	}
+
+	/** One bullet the guest fired, for Minecraft to trace (Shot in the header; blocks). */
+	public record Shot(int id, int blast, int weapon, float dirX, float dirY, float dirZ, float range, float damage, float minDamage,
+		float damageRange, float minDamageRange, float headMultiplier, float bodyMultiplier) {
+	}
+
+	/** Takes every bullet the guest fired since the last call. */
+	public static java.util.List<Shot> drainShots() {
+		MemorySegment s = view;
+		if (s == null) {
+			return java.util.List.of();
+		}
+		long base = OFF_SHOT_RING;
+		long head = (long) LONG.getAcquire(s, base + RING_HEAD);
+		long tail = s.get(JAVA_LONG, base + RING_TAIL);
+		if (head - tail > SHOT_ENTRIES) {
+			tail = head - SHOT_ENTRIES;
+		}
+		java.util.List<Shot> shots = new java.util.ArrayList<>();
+		while (tail < head) {
+			long e = base + RING_DATA + (tail & (SHOT_ENTRIES - 1)) * SHOT_BYTES;
+			float[] f = new float[10];
+			for (int i = 0; i < f.length; i++) {
+				f[i] = s.get(JAVA_FLOAT, e + 0x28 + i * 4L);
+			}
+			shots.add(new Shot(s.get(JAVA_INT, e), s.get(JAVA_INT, e + 4), s.get(JAVA_INT, e + 8), f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9]));
+			tail++;
+		}
+		LONG.setRelease(s, base + RING_TAIL, tail);
+		return shots;
+	}
+
+	/** Tells the guest what one of its bullets hit (HIT_*), for MW2's hitmarker. */
+	public static void pushHit(int shotId, int kind, double x, double y, double z, float damage, boolean headshot) {
+		MemorySegment s = view;
+		if (s == null) {
+			return;
+		}
+		long base = OFF_HIT_RING;
+		long head = s.get(JAVA_LONG, base + RING_HEAD);
+		long tail = (long) LONG.getAcquire(s, base + RING_TAIL);
+		if (head - tail >= HIT_ENTRIES) {
+			return;
+		}
+		long e = base + RING_DATA + (head & (HIT_ENTRIES - 1)) * HIT_BYTES;
+		s.set(JAVA_INT, e, shotId);
+		s.set(JAVA_INT, e + 4, kind);
+		s.set(JAVA_DOUBLE, e + 0x08, x);
+		s.set(JAVA_DOUBLE, e + 0x10, y);
+		s.set(JAVA_DOUBLE, e + 0x18, z);
+		s.set(JAVA_FLOAT, e + 0x2C, damage);
+		s.set(JAVA_INT, e + 0x30, headshot ? 1 : 0);
+		LONG.setRelease(s, base + RING_HEAD, head + 1);
 	}
 
 	/** The gun in Minecraft's hand (WEAPON_*) and the buttons held for it. */

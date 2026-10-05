@@ -93,8 +93,8 @@ Java and Rust, with layout tests on all three sides.
 |---|---|---|
 | M0 ✓ | IW4L builds natively on Windows and plays `mp_rust` with the user's MW2 (2026-10-04: `cargo build --profile play -p launcher`, `IW4L_GAMES` = the MW2 folder itself) | the real game, screenshot |
 | M1 ✓ | `iw4l --skycraft` boots hidden and publishes a viewmodel frame into the MW2 overlay | `tools/fake_mw2_host.py` saves the overlay to PNG |
-| M2 | Skyrim shows the viewmodel; it bobs, sways and sprints with MC movement (guest half ✓; Skyrim half: [HANDOFF-MW2-SKYRIM.md](HANDOFF-MW2-SKYRIM.md)) | in game, SkyCraft.log + screenshot |
-| M3 | Firing: shots reach MC, NPCs take damage and react, hitmarkers and ammo HUD work | fake host first (shot ring dump), then a bandit camp |
+| M2 ✓ | Skyrim shows the viewmodel; it bobs, sways and sprints with MC movement; the hotbar and inventory are the Minecraft map's, drawn by the guest from Minecraft's real inventory (2026-10-04) | in game, SkyCraft.log + screenshot |
+| M3 | Firing: shots reach MC, NPCs take damage and react, hitmarkers and ammo HUD work. Built 2026-10-04 (protocol v5: Control buttons, guest bullets → Shot ring → server trace → Hit ring; ADS zoom on MC's FOV), fake host ✓, in game pending | fake host first (shot ring dump), then a bandit camp |
 | M4 | ADS zoom, reload, melee, sounds polished; all three guns | in game |
 | later | Killstreaks (UAV → map reveal, care package, Predator), more guns, MW2 icons as MC item textures | |
 

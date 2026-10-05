@@ -24,7 +24,7 @@ import time
 from fake_skyrim import save_png
 
 MAGIC = 0x4732574D
-VERSION = 4
+VERSION = 5
 NAME = "Local\\SkyCraft_MW2_v1"
 OFF_OVL = 0x300
 OFF_OVL_HDR = 0x340
@@ -59,14 +59,19 @@ INVENTORY = {
     40: ("minecraft:shield", 0, 1),
 }
 
-# (name, seconds, selected hotbar slot, inventory open)
+BTN_ATTACK, BTN_ADS = 1, 2
+
+# (name, seconds, selected hotbar slot, inventory open, gun buttons)
 UI_PHASES = [
-    ("intervention", 4.0, 0, False),
-    ("spas12", 4.0, 1, False),
-    ("ump45", 4.0, 2, False),
-    ("planks", 3.0, 3, False),
-    ("empty-hand", 3.0, 8, False),
-    ("inventory", 6.0, 0, True),
+    ("intervention", 4.0, 0, False, 0),
+    ("spas12", 4.0, 1, False, 0),
+    ("ump45", 4.0, 2, False, 0),
+    ("planks", 3.0, 3, False, 0),
+    ("empty-hand", 3.0, 8, False, 0),
+    ("inventory", 6.0, 0, True, 0),
+    ("ads", 3.0, 0, False, BTN_ADS),
+    ("quickscope", 0.6, 0, False, BTN_ADS | BTN_ATTACK),
+    ("after-shot", 0.4, 0, False, 0),
 ]
 
 _tick = ctypes.windll.kernel32.GetTickCount64
@@ -155,6 +160,35 @@ class Mw2Link:
             self.m[at:at + 48] = raw + bytes(48 - len(raw))
             struct.pack_into("<IIfI", self.m, at + 0x30, item[1] if item else 0, item[2] if item else 0, -1.0, 0)
         struct.pack_into("<I", self.m, OFF_UI, seq + 2)
+
+    def write_control(self, weapon, buttons):
+        seq, = struct.unpack_from("<I", self.m, 0x100)
+        struct.pack_into("<I", self.m, 0x100, seq + 1)
+        struct.pack_into("<IIIQ", self.m, 0x104, weapon, buttons, 0, 0)
+        struct.pack_into("<I", self.m, 0x100, seq + 2)
+
+    def zoom(self):
+        ads, fov_scale = struct.unpack_from("<ff", self.m, 0x214)
+        return ads, fov_scale
+
+    def drain_shots(self):
+        head, = struct.unpack_from("<Q", self.m, 0x1000)
+        tail, = struct.unpack_from("<Q", self.m, 0x1040)
+        shots = []
+        while tail < head:
+            at = 0x1080 + (tail % 256) * 0x50
+            sid, blast, weapon = struct.unpack_from("<III", self.m, at)
+            f = struct.unpack_from("<10f", self.m, at + 0x28)
+            shots.append((sid, blast, weapon, f))
+            tail += 1
+        struct.pack_into("<Q", self.m, 0x1040, tail)
+        return shots
+
+    def push_hit(self, shot_id, kind, damage, headshot):
+        head, = struct.unpack_from("<Q", self.m, 0x9000)
+        at = 0x9080 + (head % 256) * 0x38
+        struct.pack_into("<II3d3ffII", self.m, at, shot_id, kind, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, damage, int(headshot), 0)
+        struct.pack_into("<Q", self.m, 0x9000, head + 1)
 
     def push_input(self, kind, code, x, y):
         head, = struct.unpack_from("<Q", self.m, OFF_UI_INPUT)
@@ -249,9 +283,15 @@ def main():
             if playing and phase < len(PHASES) and frames % 4 == 0:
                 tops.setdefault(PHASES[phase][0], []).append(gun_top(got))
         if playing and phase >= len(PHASES) and ui_phase < len(UI_PHASES):
-            name, length, selected, open_ = UI_PHASES[ui_phase]
+            name, length, selected, open_, buttons = UI_PHASES[ui_phase]
             ui_start = ui_start or now
             link.write_ui(selected, open_)
+            link.write_control(1 if selected == 0 else 0, buttons)
+            for shot in link.drain_shots():
+                sid, blast, weapon, f = shot
+                print(f"shot {sid:#x} (blast {blast}, weapon {weapon}): dir ({f[0]:.3f}, {f[1]:.3f}, {f[2]:.3f}) range {f[3]:.0f} blocks, "
+                      f"damage {f[4]:.0f}..{f[5]:.0f} over {f[6]:.0f}..{f[7]:.0f} blocks, head x{f[8]:.2f}, body x{f[9]:.2f}")
+                link.push_hit(sid, 3, f[4] * f[9], False)
             t = (now - ui_start) / length
             if open_:
                 # Sweep the mouse over the middle of the screen, clicking on the way.
@@ -271,10 +311,13 @@ def main():
                     w, h, _, rgba = last
                     stem = out[:-4] if out.endswith(".png") else out
                     save_png(f"{stem}-{name}.png", w, h, rgba, False)
-                    print(f"inventory {name}: saved {stem}-{name}.png (hotbar top at {link.hotbar_top():.3f} of the height)")
+                    ads, zoom = link.zoom()
+                    print(f"inventory {name}: saved {stem}-{name}.png (hotbar top at {link.hotbar_top():.3f} of the height; "
+                          f"ADS {ads:.2f}, zoom {zoom:.3f})")
                 ui_phase, ui_start = ui_phase + 1, None
                 if ui_phase == len(UI_PHASES):
                     link.write_ui(0, False)
+                    link.write_control(0, 0)
         if playing and phase < len(PHASES):
             name, length, yaw0, yaw1, pitch, speed, flags = PHASES[phase]
             t = min((now - phase_start) / length, 1.0)

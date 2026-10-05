@@ -383,7 +383,7 @@ public final class SkyClient {
 			flags |= Proto.MC_SCREEN_OPEN;
 		}
 		mc.flags = flags;
-		mc.sensitivity = minecraft.options.sensitivity().get().floatValue();
+		mc.sensitivity = Mw2Client.lookSensitivity(minecraft.options.sensitivity().get().floatValue());
 		mc.teleportAck = holdPos == null ? teleportAck : teleportAck - 1; // not "arrived" until we are released
 		mc.guiScale = minecraft.getWindow().getGuiScale();
 		mc.frameCounter = ++frameCounter;

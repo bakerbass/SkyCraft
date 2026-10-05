@@ -95,7 +95,70 @@ public final class SkyNet {
 		}
 	}
 
+	/** Client -> server: bullets the player's MW2 gun fired this frame (the guest's Shot ring). */
+	public record Mw2Shots(List<dev.skycraft.link.Mw2Link.Shot> shots) implements CustomPacketPayload {
+		public static final Type<Mw2Shots> TYPE = new Type<>(Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "mw2_shots"));
+		private static final StreamCodec<RegistryFriendlyByteBuf, dev.skycraft.link.Mw2Link.Shot> SHOT = StreamCodec.of(
+			(buf, s) -> {
+				buf.writeInt(s.id());
+				buf.writeInt(s.blast());
+				buf.writeInt(s.weapon());
+				for (float f : new float[] { s.dirX(), s.dirY(), s.dirZ(), s.range(), s.damage(), s.minDamage(), s.damageRange(), s.minDamageRange(),
+					s.headMultiplier(), s.bodyMultiplier() }) {
+					buf.writeFloat(f);
+				}
+			},
+			buf -> new dev.skycraft.link.Mw2Link.Shot(buf.readInt(), buf.readInt(), buf.readInt(), buf.readFloat(), buf.readFloat(), buf.readFloat(),
+				buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat())
+		);
+		public static final StreamCodec<RegistryFriendlyByteBuf, Mw2Shots> CODEC =
+			SHOT.apply(ByteBufCodecs.list(64)).map(Mw2Shots::new, Mw2Shots::shots);
+
+		@Override
+		public Type<? extends CustomPacketPayload> type() {
+			return TYPE;
+		}
+	}
+
+	/** One bullet's result for the shooter's guest (its Hit ring): what it hit, where, MW2 damage dealt. */
+	public record Mw2Hit(int shotId, int kind, double x, double y, double z, float damage, boolean headshot) {
+		public static final StreamCodec<RegistryFriendlyByteBuf, Mw2Hit> CODEC = StreamCodec.of(
+			(buf, h) -> {
+				buf.writeInt(h.shotId());
+				buf.writeVarInt(h.kind());
+				buf.writeDouble(h.x());
+				buf.writeDouble(h.y());
+				buf.writeDouble(h.z());
+				buf.writeFloat(h.damage());
+				buf.writeBoolean(h.headshot());
+			},
+			buf -> new Mw2Hit(buf.readInt(), buf.readVarInt(), buf.readDouble(), buf.readDouble(), buf.readDouble(), buf.readFloat(), buf.readBoolean())
+		);
+	}
+
+	/** Server -> client: what the player's bullets hit. */
+	public record Mw2Hits(List<Mw2Hit> hits) implements CustomPacketPayload {
+		public static final Type<Mw2Hits> TYPE = new Type<>(Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "mw2_hits"));
+		public static final StreamCodec<RegistryFriendlyByteBuf, Mw2Hits> CODEC = Mw2Hit.CODEC.apply(ByteBufCodecs.list(64)).map(Mw2Hits::new, Mw2Hits::hits);
+
+		@Override
+		public Type<? extends CustomPacketPayload> type() {
+			return TYPE;
+		}
+	}
+
 	public static void init() {
+		PayloadTypeRegistry.serverboundPlay().register(Mw2Shots.TYPE, Mw2Shots.CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(Mw2Hits.TYPE, Mw2Hits.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(Mw2Shots.TYPE, (payload, context) -> {
+			ServerPlayer player = context.player();
+			context.server().execute(() -> {
+				List<Mw2Hit> hits = dev.skycraft.mw2.Mw2Guns.fire(player, payload.shots());
+				if (!hits.isEmpty() && ServerPlayNetworking.canSend(player, Mw2Hits.TYPE)) {
+					ServerPlayNetworking.send(player, new Mw2Hits(hits));
+				}
+			});
+		});
 		PayloadTypeRegistry.serverboundPlay().register(Hurt.TYPE, Hurt.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RequestMw2Guns.TYPE, RequestMw2Guns.CODEC);
 		ServerPlayNetworking.registerGlobalReceiver(RequestMw2Guns.TYPE, (payload, context) -> {

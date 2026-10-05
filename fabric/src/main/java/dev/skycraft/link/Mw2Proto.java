@@ -8,7 +8,7 @@ public final class Mw2Proto {
 	}
 
 	public static final int MAGIC = 0x4732574D; // "MW2G"
-	public static final int VERSION = 4;
+	public static final int VERSION = 5;
 	public static final String MAPPING_NAME = "Local\\SkyCraft_MW2_v1";
 
 	// Header
@@ -22,6 +22,12 @@ public final class Mw2Proto {
 	public static final long OFF_CONTROL = 0x100;
 	public static final long CT_SEQ = 0x00, CT_WEAPON = 0x04, CT_BUTTONS = 0x08, CT_MC_FRAME = 0x10;
 
+	public static final int BTN_ATTACK = 1;
+	public static final int BTN_ADS = 1 << 1;
+	public static final int BTN_RELOAD = 1 << 2;
+	public static final int BTN_MELEE = 1 << 3;
+	public static final int BTN_HOLD_BREATH = 1 << 7;
+
 	public static final int WEAPON_NONE = 0;
 	public static final int WEAPON_INTERVENTION = 1;
 	public static final int WEAPON_SPAS12 = 2;
@@ -29,11 +35,25 @@ public final class Mw2Proto {
 
 	// State (guest -> Minecraft, seqlock)
 	public static final long OFF_STATE = 0x200;
-	public static final long ST_SEQ = 0x00, ST_FLAGS = 0x04, ST_HOTBAR_TOP = 0x28;
+	public static final long ST_SEQ = 0x00, ST_FLAGS = 0x04, ST_ADS_FRACTION = 0x14, ST_FOV_SCALE = 0x18, ST_HOTBAR_TOP = 0x28;
 	public static final int ST_READY = 1;
 
 	// SPSC rings: head (writer) at +0x00, tail (reader) at +0x40, entries from +0x80.
 	public static final long RING_HEAD = 0x00, RING_TAIL = 0x40, RING_DATA = 0x80;
+
+	// Shots (guest -> Minecraft ring) and hits (Minecraft -> guest ring)
+	public static final long OFF_SHOT_RING = 0x1000;
+	public static final int SHOT_ENTRIES = 256;
+	public static final long SHOT_BYTES = 0x50;
+	public static final long OFF_HIT_RING = 0x9000;
+	public static final int HIT_ENTRIES = 256;
+	public static final long HIT_BYTES = 0x38;
+	public static final int HIT_MISS = 0;
+	public static final int HIT_WORLD = 1;
+	public static final int HIT_BLOCK = 2;
+	public static final int HIT_ACTOR = 3;
+	public static final int HIT_KILL = 4;
+	public static final int HIT_MOB = 5;
 
 	// Inventory (Minecraft -> guest, seqlock)
 	public static final long OFF_UI = 0xD000;

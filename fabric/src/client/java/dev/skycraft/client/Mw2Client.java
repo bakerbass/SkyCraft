@@ -22,6 +22,11 @@ import net.minecraft.world.item.ItemStack;
  * and applies the clicks the guest's inventory screen makes with vanilla's container rules.
  */
 public final class Mw2Client {
+	/** MW2's reload: Minecraft has none of its own. */
+	public static final net.minecraft.client.KeyMapping RELOAD = new net.minecraft.client.KeyMapping("key.skycraft.mw2_reload",
+		com.mojang.blaze3d.platform.InputConstants.KEY_R,
+		net.minecraft.client.KeyMapping.Category.register(net.minecraft.resources.Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "mw2")));
+
 	private static boolean active;
 	private static int gunsAskedFor = -1;
 	private static long frame;
@@ -32,6 +37,48 @@ public final class Mw2Client {
 	/** The guest owns the hotbar and inventory this frame. */
 	public static boolean active() {
 		return active;
+	}
+
+	/** Registers MW2's keys and takes the server's word on what the player's bullets hit. */
+	public static void init() {
+		net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper.registerKeyMapping(RELOAD);
+		ClientPlayNetworking.registerGlobalReceiver(dev.skycraft.net.SkyNet.Mw2Hits.TYPE, (payload, context) -> {
+			for (var hit : payload.hits()) {
+				Mw2Link.pushHit(hit.shotId(), hit.kind(), hit.x(), hit.y(), hit.z(), hit.damage(), hit.headshot());
+			}
+		});
+	}
+
+	/** One of MW2's guns is in hand and up: Minecraft's attack and use give way to it. */
+	public static boolean holdsGun() {
+		if (!active) {
+			return false;
+		}
+		LocalPlayer player = Minecraft.getInstance().player;
+		return player != null && Mw2Guns.weaponOf(player.getMainHandItem()) != WEAPON_NONE;
+	}
+
+	/** Minecraft's field of view (degrees) with MW2's aim-down-sights zoom on it. */
+	public static float zoomFov(float fov) {
+		float zoom = holdsGun() ? Mw2Link.fovScale() : 1.0F;
+		if (zoom >= 0.999F) {
+			return fov;
+		}
+		return (float) Math.toDegrees(2.0 * Math.atan(Math.tan(Math.toRadians(fov) * 0.5) * zoom));
+	}
+
+	/**
+	 * Minecraft's mouse sensitivity setting for Skyrim's look (which turns s = 0.6 x + 0.2, cubed),
+	 * lowered while zoomed so the view turns as much less as it shows less, as MW2's zoom
+	 * sensitivity does.
+	 */
+	public static float lookSensitivity(float sensitivity) {
+		float zoom = holdsGun() ? Mw2Link.fovScale() : 1.0F;
+		if (zoom >= 0.999F) {
+			return sensitivity;
+		}
+		double s = (sensitivity * 0.6 + 0.2) * Math.cbrt(zoom);
+		return (float) Math.max(0.001, (s - 0.2) / 0.6);
 	}
 
 	/**
@@ -78,7 +125,42 @@ public final class Mw2Client {
 		}
 		applyClicks(minecraft, player);
 		publish(minecraft, player);
-		Mw2Link.writeControl(Mw2Guns.weaponOf(player.getMainHandItem()), 0, frame);
+		Mw2Link.writeControl(Mw2Guns.weaponOf(player.getMainHandItem()), buttons(minecraft, player), frame);
+		var shots = Mw2Link.drainShots();
+		if (!shots.isEmpty() && ClientPlayNetworking.canSend(dev.skycraft.net.SkyNet.Mw2Shots.TYPE)) {
+			for (int i = 0; i < shots.size(); i += 64) {
+				ClientPlayNetworking.send(new dev.skycraft.net.SkyNet.Mw2Shots(shots.subList(i, Math.min(shots.size(), i + 64))));
+			}
+		}
+	}
+
+	/**
+	 * The gun's buttons, from Minecraft's own keys while one of MW2's guns is held and no screen is
+	 * open: attack fires, use aims down the sights, sneak holds a sniper's breath, R reloads.
+	 * Aiming or firing stops a sprint, as in MW2.
+	 */
+	private static int buttons(Minecraft minecraft, LocalPlayer player) {
+		if (!holdsGun() || minecraft.gui.screen() != null) {
+			return 0;
+		}
+		var options = minecraft.options;
+		int buttons = 0;
+		if (options.keyAttack.isDown()) {
+			buttons |= BTN_ATTACK;
+		}
+		if (options.keyUse.isDown()) {
+			buttons |= BTN_ADS;
+		}
+		if (RELOAD.isDown()) {
+			buttons |= BTN_RELOAD;
+		}
+		if (options.keyShift.isDown()) {
+			buttons |= BTN_HOLD_BREATH;
+		}
+		if ((buttons & (BTN_ATTACK | BTN_ADS)) != 0 && player.isSprinting()) {
+			player.setSprinting(false);
+		}
+		return buttons;
 	}
 
 	private static void publish(Minecraft minecraft, LocalPlayer player) {
