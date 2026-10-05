@@ -106,7 +106,31 @@ Don't change the code until the diagnostics below say which surface floods.
 - **No location:** neither Skyrim's nor Minecraft's log says where the player was when swimming,
   so the offending surface can't be identified yet.
 
-**Suspects, most likely first:**
+**Diagnosed (00:27–00:28 run, `bWaterDiagnostics`).** All 7 wet spots were in cell `0001A276`
+`WhiterunPlainsDistrict04`, under one surface. Skyrim said `swimming false` every time, and the cell
+has `hasWater false`.
+
+```
+1 of 78 placed surfaces cover it: h -3264 (+9..+141 vs feet) box centre (24811, -6335) half 428 x 564
+  plane n=(0,0,1) c=-3008 | waterType 00085FC8 | flags 05 | shape 'Water'
+```
+
+- **Terraced water:** the plane says −3008, but the mesh's bound centre is −3264, 256 lower. This is
+  the stream stepping down Whiterun's terraces, one mesh spanning several levels. Neither single
+  height is right everywhere.
+- **Box too big:** the multibound AABB (856 × 1128 units) is much bigger than the narrow channel, so
+  the dry streets beside it count as covered.
+
+**Fix to build:** per-column water from the actual water geometry.
+- **Option A:** the shape's world-space triangles. Point-in-triangle for the column, then interpolate
+  the z. Check `BSTriShape` keeps CPU vertex data (`BSGeometry::GetGeometryRuntimeData`, the
+  vertex desc). If it's GPU-only, try B.
+- **Option B:** Skyrim's own water. A Havok raycast down per column against water collision volumes,
+  or `RE::Actor::GetSubmergedWaterLevel` style checks. Skyrim's `swimming` was right every time.
+- **Interim mitigation:** require the column's water height to be at most a few units below
+  `plane.constant` and above Skyrim's land height there. It doesn't solve terraces by itself.
+
+**Earlier suspects, before the diagnosis:**
 1. **Cell planes are back:** `TESWaterSystem::waterObjects` probably includes the flat water planes
    Skyrim builds from each cell's water height (exterior cells flagged `kHasWater`, and the
    `WhiterunWorld` default). That brings back the old one-level-per-cell flood through objects.
@@ -229,6 +253,20 @@ dragon's flight path is bounded.
     `shep_*`/`gen_shepherd_*`).
 - **Trigger:** a Skyrim quest stage or a placed activator in the dungeon. Start with a console
   command.
+
+## 6b. Inventory character (fixed, plus a wish)
+
+- **Fixed:** the soldier was missing from the inventory's character box after `d87aed6`. It was
+  placed against the hidden window's size while the box is in the HUD's (image) size; fixed in the
+  guest after `d87aed6`.
+- **Wish:** show the *Minecraft* player there (skin and armour), not the MW2 soldier. The guest draws
+  the soldier in that box.
+  - **Option 1:** Minecraft renders its own player preview
+    (`InventoryScreen.extractEntityInInventoryFollowsMouse`) into its overlay at the box's rectangle.
+    The guest publishes `character_box` in the MW2 mapping, and `Mw2InventoryScreen` draws the
+    entity there. It's in Minecraft's layer, which sits over MW2's except in the hotbar band, so it
+    shows over the panel.
+  - **Option 2:** the guest skips the puppet (`InventoryPuppet.active = false` in guest mode).
 
 ## 7. Smaller follow-ups
 
