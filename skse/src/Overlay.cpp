@@ -43,12 +43,13 @@ namespace skycraft
 			float viewport[2];
 			float cursorOn;
 			float flipY;
-			float pad[2];
+			float clipMode;  // 0: everywhere; 1: only from clipY down; 2: only above clipY
+			float clipY;     // back buffer pixels
 			float invertRect[4];  // back buffer pixels: x0, y0, x1, y1 (empty: none)
 		};
 
 		constexpr char kShader[] = R"(
-cbuffer Params : register(b0) { float2 cursor; float2 viewport; float cursorOn; float flipY; float2 pad; float4 invertRect; };
+cbuffer Params : register(b0) { float2 cursor; float2 viewport; float cursorOn; float flipY; float clipMode; float clipY; float4 invertRect; };
 Texture2D overlay : register(t0);
 SamplerState samp : register(s0);
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
@@ -71,6 +72,7 @@ float4 PSInvert(VSOut i) : SV_Target {
 	return float4(Overlay(i.uv).rgb, 0);
 }
 float4 PSMain(VSOut i) : SV_Target {
+	if (clipMode > 0.5 && ((clipMode < 1.5) == (i.pos.y < clipY))) discard;
 	float2 uv = i.uv;
 	if (InInvertRect(i.pos.xy)) return 0;
 	float4 c = Overlay(uv);
@@ -341,18 +343,18 @@ float4 PSMain(VSOut i) : SV_Target {
 			context->PSSetShader(ps, nullptr, 0);
 			context->PSSetConstantBuffers(0, 1, &params);
 
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			if (drawMw2 && SUCCEEDED(context->Map(params, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-				// Stretched over the back buffer as it is: no cursor, no flip, no invert pass.
-				*static_cast<Params*>(mapped.pData) = Params{ .viewport = { float(bbDesc.Width), float(bbDesc.Height) } };
-				context->Unmap(params, 0);
-				context->PSSetShaderResources(0, 1, &mw2Layer.srv);
-				context->PSSetSamplers(0, 1, &linearSampler);
-				context->Draw(3, 0);
-			}
+			// Minecraft's layer goes over MW2's, except along the bottom from the top of MW2's hotbar
+			// down: there Minecraft's hand and held item go under MW2's hotbar. Not while a Minecraft
+			// screen is open, which goes over everything.
+			const float hotbarTop = drawMw2 && drawMc && !st.mcScreenOpen ? Mw2::HotbarTop() : 0.0f;
+			const float bandY = hotbarTop > 0.0f ? (hotbarTop - 0.02f) * float(bbDesc.Height) : 0.0f;
 
-			bool invert = false;
-			if (drawMc && SUCCEEDED(context->Map(params, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+			D3D11_MAPPED_SUBRESOURCE mapped{};
+			bool                     invert = false;
+			const auto               drawMcLayer = [&](float a_clipMode) {
+				if (!SUCCEEDED(context->Map(params, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+					return;
+				}
 				auto* p = static_cast<Params*>(mapped.pData);
 				// The cursor lives in overlay pixels; scale if the overlay and back buffer differ.
 				const float sx = mcLayer.w ? float(bbDesc.Width) / float(mcLayer.w) : 1.0f;
@@ -363,6 +365,8 @@ float4 PSMain(VSOut i) : SV_Target {
 				p->viewport[1] = float(bbDesc.Height);
 				p->cursorOn = st.mcScreenOpen ? 1.0f : 0.0f;
 				p->flipY = flipY ? 1.0f : 0.0f;
+				p->clipMode = a_clipMode;
+				p->clipY = bandY;
 				// Around the screen centre, where Minecraft puts the crosshair (15 GUI pixels) and the
 				// attack indicator under it (16 x 16 from 9 GUI pixels below the centre).
 				const int   scale = st.mcGuiScale;
@@ -377,6 +381,21 @@ float4 PSMain(VSOut i) : SV_Target {
 				context->PSSetShaderResources(0, 1, &mcLayer.srv);
 				context->PSSetSamplers(0, 1, &sampler);
 				context->Draw(3, 0);
+			};
+
+			if (bandY > 0.0f) {
+				drawMcLayer(1.0f);
+			}
+			if (drawMw2 && SUCCEEDED(context->Map(params, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+				// Stretched over the back buffer as it is: no cursor, no flip, no invert pass.
+				*static_cast<Params*>(mapped.pData) = Params{ .viewport = { float(bbDesc.Width), float(bbDesc.Height) } };
+				context->Unmap(params, 0);
+				context->PSSetShaderResources(0, 1, &mw2Layer.srv);
+				context->PSSetSamplers(0, 1, &linearSampler);
+				context->Draw(3, 0);
+			}
+			if (drawMc) {
+				drawMcLayer(bandY > 0.0f ? 2.0f : 0.0f);
 			}
 			if (invert) {
 				context->OMSetBlendState(invertBlend, factor, 0xFFFFFFFF);

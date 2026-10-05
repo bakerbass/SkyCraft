@@ -16,7 +16,7 @@
 namespace skycraft::mw2
 {
 	inline constexpr std::uint32_t kMagic = 0x4732574D;  // "MW2G"
-	inline constexpr std::uint32_t kVersion = 3;
+	inline constexpr std::uint32_t kVersion = 4;
 	inline constexpr wchar_t       kMappingName[] = L"Local\\SkyCraft_MW2_v1";
 
 	// ---- region offsets ---------------------------------------------------------------------
@@ -211,7 +211,7 @@ namespace skycraft::mw2
 		std::uint32_t seq;
 		std::uint32_t flags;     // UiFlags
 		std::uint32_t selected;  // hotbar slot, 0..8
-		std::uint32_t pad0C;
+		float         guiUnit;   // one Minecraft GUI pixel, a fraction of the screen's height: the guest's hotbar matches Minecraft's
 		std::uint64_t mcFrame;
 		std::uint64_t pad18;
 		UiStack       stacks[kUiStacks];

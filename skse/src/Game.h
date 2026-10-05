@@ -109,6 +109,8 @@ namespace skycraft
 		[[nodiscard]] bool GuestAlive();
 		// The guest's soldier is spawned (State.flags & kStReady).
 		[[nodiscard]] bool Ready();
+		// Top of the guest's hotbar, a fraction of the screen's height (0: not shown).
+		[[nodiscard]] float HotbarTop();
 		// Present, every frame: the size to render at (Skyrim's back buffer) and Skyrim's heartbeat.
 		void WriteHeader(std::uint32_t a_backBufferW, std::uint32_t a_backBufferH);
 

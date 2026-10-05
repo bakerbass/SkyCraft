@@ -179,8 +179,11 @@ public final class Mw2Link {
 	private static final Stack SCRATCH = new Stack();
 	private static final byte[] ID_BYTES = new byte[UI_ID_BYTES];
 
-	/** Writes the inventory snapshot under its seqlock: every stack from a_source. */
-	public static void writeUi(int flags, int selected, long mcFrame, StackSource source) {
+	/**
+	 * Writes the inventory snapshot under its seqlock: every stack from a_source. guiUnit is one
+	 * Minecraft GUI pixel as a fraction of the screen's height.
+	 */
+	public static void writeUi(int flags, int selected, float guiUnit, long mcFrame, StackSource source) {
 		MemorySegment s = view;
 		if (s == null) {
 			return;
@@ -191,6 +194,7 @@ public final class Mw2Link {
 		VarHandle.storeStoreFence();
 		s.set(JAVA_INT, b + UI_FLAGS, flags);
 		s.set(JAVA_INT, b + UI_SELECTED, selected);
+		s.set(JAVA_FLOAT, b + UI_GUI_UNIT, guiUnit);
 		s.set(JAVA_LONG, b + UI_MC_FRAME, mcFrame);
 		for (int i = 0; i < UI_STACK_COUNT; i++) {
 			Stack stack = SCRATCH;

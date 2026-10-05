@@ -8,7 +8,7 @@ public final class Mw2Proto {
 	}
 
 	public static final int MAGIC = 0x4732574D; // "MW2G"
-	public static final int VERSION = 3;
+	public static final int VERSION = 4;
 	public static final String MAPPING_NAME = "Local\\SkyCraft_MW2_v1";
 
 	// Header
@@ -37,7 +37,7 @@ public final class Mw2Proto {
 
 	// Inventory (Minecraft -> guest, seqlock)
 	public static final long OFF_UI = 0xD000;
-	public static final long UI_SEQ = 0x00, UI_FLAGS = 0x04, UI_SELECTED = 0x08, UI_MC_FRAME = 0x10, UI_STACKS = 0x20;
+	public static final long UI_SEQ = 0x00, UI_FLAGS = 0x04, UI_SELECTED = 0x08, UI_GUI_UNIT = 0x0C, UI_MC_FRAME = 0x10, UI_STACKS = 0x20;
 	public static final int UI_ACTIVE = 1;
 	public static final int UI_INVENTORY_OPEN = 1 << 1;
 	public static final int UI_INVENTORY_SLOTS = 41;

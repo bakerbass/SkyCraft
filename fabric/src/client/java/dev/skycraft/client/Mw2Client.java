@@ -68,7 +68,7 @@ public final class Mw2Client {
 		}
 		frame++;
 		if (player == null || minecraft.gameMode == null) {
-			Mw2Link.writeUi(0, 0, frame, null);
+			Mw2Link.writeUi(0, 0, 0.0F, frame, null);
 			Mw2Link.writeControl(WEAPON_NONE, 0, frame);
 			return;
 		}
@@ -88,7 +88,9 @@ public final class Mw2Client {
 		}
 		var inventory = player.getInventory();
 		InventoryMenu menu = player.inventoryMenu;
-		Mw2Link.writeUi(flags, inventory.getSelectedSlot(), frame, (index, out) -> {
+		var window = minecraft.getWindow();
+		float guiUnit = window.getHeight() > 0 ? (float) window.getGuiScale() / window.getHeight() : 0.0F;
+		Mw2Link.writeUi(flags, inventory.getSelectedSlot(), guiUnit, frame, (index, out) -> {
 			ItemStack stack;
 			if (index < UI_INVENTORY_SLOTS) {
 				stack = inventory.getItem(index);

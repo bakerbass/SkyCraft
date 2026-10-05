@@ -24,7 +24,7 @@ import time
 from fake_skyrim import save_png
 
 MAGIC = 0x4732574D
-VERSION = 3
+VERSION = 4
 NAME = "Local\\SkyCraft_MW2_v1"
 OFF_OVL = 0x300
 OFF_OVL_HDR = 0x340
@@ -146,7 +146,8 @@ class Mw2Link:
         seq, = struct.unpack_from("<I", self.m, OFF_UI)
         struct.pack_into("<I", self.m, OFF_UI, seq + 1)
         flags = UI_ACTIVE | (UI_INVENTORY_OPEN if open_ else 0)
-        struct.pack_into("<IIIQ", self.m, OFF_UI + 4, flags, selected, 0, 0)
+        # Minecraft's GUI scale 7 at 1800 pixels high, as on a 2880x1800 screen.
+        struct.pack_into("<IIfQ", self.m, OFF_UI + 4, flags, selected, 7 / 1800, 0)
         for i in range(47):
             item = INVENTORY.get(i)
             at = OFF_UI + 0x20 + i * 0x40

@@ -3,6 +3,7 @@
 #include <SimpleIni.h>
 
 #include <filesystem>
+#include <bit>
 #include <format>
 
 // MW2's guns (docs/MW2.md). IW4L, the Rust MW2 runtime, runs hidden as a third process: it plays
@@ -245,6 +246,28 @@ namespace skycraft::Mw2
 			}
 		}
 		return false;
+	}
+
+	float HotbarTop()
+	{
+		if (!base) {
+			return 0.0f;
+		}
+		auto* state = At<mw2::State>(mw2::kOffState);
+		auto  seq = Atomic(state->seq);
+		for (int attempt = 0; attempt < 16; ++attempt) {
+			const auto s1 = seq.load(std::memory_order_acquire);
+			if (s1 & 1) {
+				_mm_pause();
+				continue;
+			}
+			const auto top = std::bit_cast<float>(Atomic(*reinterpret_cast<std::uint32_t*>(&state->hotbarTop)).load(std::memory_order_relaxed));
+			std::atomic_thread_fence(std::memory_order_acquire);
+			if (seq.load(std::memory_order_relaxed) == s1) {
+				return std::isfinite(top) ? std::clamp(top, 0.0f, 1.0f) : 0.0f;
+			}
+		}
+		return 0.0f;
 	}
 
 	void WriteHeader(std::uint32_t a_backBufferW, std::uint32_t a_backBufferH)
