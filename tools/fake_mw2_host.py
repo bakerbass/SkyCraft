@@ -6,10 +6,15 @@ saves the last one (with its alpha) to a PNG.
 
     python tools/fake_mw2_host.py [seconds] [out.png] [width] [height]
 
+After Minecraft's player has walked, sprinted and turned, it plays Minecraft's inventory: picks
+each gun, a block and an empty hand on the hotbar, then opens the inventory, sweeps the mouse
+over it clicking, and prints the clicks the guest hands back. Each step is saved as a PNG.
+
 Start the guest separately, e.g. with IW4L_SKYCRAFT=1 and IW4L_GAMES pointing at MW2:
     iw4l.exe map mp_rust --cmds "wait world; spawn 0; force_match_start"
 """
 
+import ctypes
 import math
 import mmap
 import struct
@@ -19,13 +24,53 @@ import time
 from fake_skyrim import save_png
 
 MAGIC = 0x4732574D
-VERSION = 1
+VERSION = 2
 NAME = "Local\\SkyCraft_MW2_v1"
 OFF_OVL = 0x300
 OFF_OVL_HDR = 0x340
 OFF_PIX = 0x10000
 SLOT = 3840 * 2160 * 4
 SIZE = OFF_PIX + SLOT * 3
+
+# The inventory (protocol/skycraft_mw2.h): snapshot, input ring, click ring.
+OFF_UI = 0xD000
+OFF_UI_INPUT = 0xE000
+OFF_UI_CLICKS = 0xF000
+UI_ACTIVE, UI_INVENTORY_OPEN = 1, 2
+UI_IN_MOVE, UI_IN_DOWN, UI_IN_UP = 1, 2, 3
+CLICK_KINDS = {1: "slot", 2: "outside", 3: "gather", 4: "swap", 5: "spread"}
+
+# What Minecraft's player carries: stack index -> (item id, MW2 weapon, count).
+INVENTORY = {
+    0: ("skycraft:mw2_intervention", 1, 1),
+    1: ("skycraft:mw2_spas12", 2, 1),
+    2: ("skycraft:mw2_ump45", 3, 1),
+    3: ("minecraft:oak_planks", 0, 64),
+    4: ("minecraft:torch", 0, 32),
+    5: ("minecraft:diamond_sword", 0, 1),
+    9: ("minecraft:cobblestone", 0, 64),
+    10: ("minecraft:stone_bricks", 0, 64),
+    11: ("minecraft:glass", 0, 64),
+    12: ("minecraft:golden_apple", 0, 4),
+    36: ("minecraft:iron_boots", 0, 1),
+    37: ("minecraft:iron_leggings", 0, 1),
+    38: ("minecraft:iron_chestplate", 0, 1),
+    39: ("minecraft:iron_helmet", 0, 1),
+    40: ("minecraft:shield", 0, 1),
+}
+
+# (name, seconds, selected hotbar slot, inventory open)
+UI_PHASES = [
+    ("intervention", 4.0, 0, False),
+    ("spas12", 4.0, 1, False),
+    ("ump45", 4.0, 2, False),
+    ("planks", 3.0, 3, False),
+    ("empty-hand", 3.0, 8, False),
+    ("inventory", 6.0, 0, True),
+]
+
+_tick = ctypes.windll.kernel32.GetTickCount64
+_tick.restype = ctypes.c_uint64
 
 
 MAIN_NAME = "Local\\SkyCraft_v1"
@@ -86,7 +131,40 @@ class Mw2Link:
         self.front = 2  # middle starts at 0, the writer's back slot at 1
 
     def heartbeat(self):
-        struct.pack_into("<Q", self.m, 0x10, int(time.monotonic() * 1000))
+        # GetTickCount64, as Skyrim writes it: the guest compares it with its own clock.
+        struct.pack_into("<Q", self.m, 0x10, _tick())
+
+    def write_ui(self, selected, open_):
+        """Minecraft's inventory snapshot, under its seqlock."""
+        seq, = struct.unpack_from("<I", self.m, OFF_UI)
+        struct.pack_into("<I", self.m, OFF_UI, seq + 1)
+        flags = UI_ACTIVE | (UI_INVENTORY_OPEN if open_ else 0)
+        struct.pack_into("<IIIQ", self.m, OFF_UI + 4, flags, selected, 0, 0)
+        for i in range(47):
+            item = INVENTORY.get(i)
+            at = OFF_UI + 0x20 + i * 0x40
+            raw = item[0].encode() if item else b""
+            self.m[at:at + 48] = raw + bytes(48 - len(raw))
+            struct.pack_into("<IIfI", self.m, at + 0x30, item[1] if item else 0, item[2] if item else 0, -1.0, 0)
+        struct.pack_into("<I", self.m, OFF_UI, seq + 2)
+
+    def push_input(self, kind, code, x, y):
+        head, = struct.unpack_from("<Q", self.m, OFF_UI_INPUT)
+        at = OFF_UI_INPUT + 0x80 + (head % 128) * 16
+        struct.pack_into("<HHHHff", self.m, at, kind, code, 0, 0, x, y)
+        struct.pack_into("<Q", self.m, OFF_UI_INPUT, head + 1)
+
+    def drain_clicks(self):
+        head, = struct.unpack_from("<Q", self.m, OFF_UI_CLICKS)
+        tail, = struct.unpack_from("<Q", self.m, OFF_UI_CLICKS + 0x40)
+        clicks = []
+        while tail < head:
+            at = OFF_UI_CLICKS + 0x80 + (tail % 64) * 32
+            kind, slot, flags, hotbar, mask = struct.unpack_from("<IIIIQ", self.m, at)
+            clicks.append((CLICK_KINDS.get(kind, kind), slot, flags, hotbar, mask))
+            tail += 1
+        struct.pack_into("<Q", self.m, OFF_UI_CLICKS + 0x40, tail)
+        return clicks
 
     def ready(self):
         flags, = struct.unpack_from("<I", self.m, 0x204)
@@ -133,6 +211,7 @@ def main():
     phase, phase_start, playing = 0, None, False
     ready_since = None
     tops = {}
+    ui_phase, ui_start, ui_step, clicks = 0, None, -1, []
     now = time.monotonic()
     while now < deadline:
         dt = time.monotonic() - now
@@ -156,6 +235,33 @@ def main():
                 print("guest ready; playing the script")
             if playing and phase < len(PHASES) and frames % 4 == 0:
                 tops.setdefault(PHASES[phase][0], []).append(gun_top(got))
+        if playing and phase >= len(PHASES) and ui_phase < len(UI_PHASES):
+            name, length, selected, open_ = UI_PHASES[ui_phase]
+            ui_start = ui_start or now
+            link.write_ui(selected, open_)
+            t = (now - ui_start) / length
+            if open_:
+                # Sweep the mouse over the middle of the screen, clicking on the way.
+                step = int(t * 48)
+                if step != ui_step:
+                    ui_step = step
+                    x = 0.35 + 0.30 * ((step % 8) / 7.0)
+                    y = 0.30 + 0.40 * ((step // 8) / 5.0)
+                    link.push_input(UI_IN_MOVE, 0, x, y)
+                    if step % 3 == 1:
+                        link.push_input(UI_IN_DOWN, 0, x, y)
+                        link.push_input(UI_IN_UP, 0, x, y)
+            for click in link.drain_clicks():
+                clicks.append((name, click))
+            if t >= 1.0:
+                if last:
+                    w, h, _, rgba = last
+                    stem = out[:-4] if out.endswith(".png") else out
+                    save_png(f"{stem}-{name}.png", w, h, rgba, False)
+                    print(f"inventory {name}: saved {stem}-{name}.png")
+                ui_phase, ui_start = ui_phase + 1, None
+                if ui_phase == len(UI_PHASES):
+                    link.write_ui(0, False)
         if playing and phase < len(PHASES):
             name, length, yaw0, yaw1, pitch, speed, flags = PHASES[phase]
             t = min((now - phase_start) / length, 1.0)
@@ -173,6 +279,10 @@ def main():
         elif not playing:
             mc.write(MC_IN_WORLD | MC_ON_GROUND, 0.0, 0.0, [0.0, 0.0, 0.0], dt)
         time.sleep(0.005)
+    for name, click in clicks:
+        print(f"click during {name}: {click}")
+    if ui_phase == len(UI_PHASES) and not clicks:
+        print("no clicks came back from the inventory screen")
     for name, values in tops.items():
         values = [v for v in values if v is not None]
         if values:

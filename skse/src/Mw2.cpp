@@ -87,9 +87,11 @@ namespace skycraft::Mw2
 				}
 			}
 
-			// Start clean: header, control, state and the overlay swap, and both rings empty.
+			// Start clean: header, control, state and the overlay swap, every ring empty and no
+			// inventory.
 			std::memset(base, 0, mw2::kOffShotRing + mw2::kRingDataOff);
 			std::memset(base + mw2::kOffHitRing, 0, mw2::kRingDataOff);
+			std::memset(base + mw2::kOffUi, 0, mw2::kOffOverlayPixels - mw2::kOffUi);
 			Header()->version = mw2::kVersion;
 			Header()->hostHeartbeatMs = ::GetTickCount64();
 			Atomic(Header()->magic).store(mw2::kMagic, std::memory_order_release);

@@ -16,7 +16,7 @@
 namespace skycraft::mw2
 {
 	inline constexpr std::uint32_t kMagic = 0x4732574D;  // "MW2G"
-	inline constexpr std::uint32_t kVersion = 1;
+	inline constexpr std::uint32_t kVersion = 2;
 	inline constexpr wchar_t       kMappingName[] = L"Local\\SkyCraft_MW2_v1";
 
 	// ---- region offsets ---------------------------------------------------------------------
@@ -175,6 +175,112 @@ namespace skycraft::mw2
 	};
 	static_assert(sizeof(Hit) == 0x38);
 
+	// ---- inventory @0xD000 (Minecraft -> guest, seqlock) ------------------------------------
+	// Minecraft owns the player's inventory; the guest draws it (hotbar, and the inventory
+	// screen with the MW2 soldier in it) in MW2's style. Stacks, in this order:
+	//   0..8 hotbar, 9..35 main, 36..39 armour (feet to head), 40 offhand (vanilla Inventory),
+	//   41..44 the 2x2 crafting grid, 45 its result, 46 the stack on the cursor.
+	inline constexpr std::uint64_t kOffUi = 0xD000;
+	inline constexpr std::uint32_t kUiInventorySlots = 41;
+	inline constexpr std::uint32_t kUiCrafting = 41;
+	inline constexpr std::uint32_t kUiResult = 45;
+	inline constexpr std::uint32_t kUiCursor = 46;
+	inline constexpr std::uint32_t kUiStacks = 47;
+
+	enum UiFlags : std::uint32_t
+	{
+		kUiActive = 1u << 0,         // Minecraft's player is in a world: the guest owns the hotbar
+		kUiInventoryOpen = 1u << 1,  // the inventory screen is open
+	};
+
+	struct UiStack
+	{
+		char          id[48];      // item id, NUL-terminated ("minecraft:dirt"); empty = no stack
+		std::uint32_t weapon;      // Weapon, for an MW2 gun item; else kWeaponNone
+		std::uint32_t count;
+		float         durability;  // fraction left of a damaged item, else -1
+		std::uint32_t pad;
+	};
+	static_assert(sizeof(UiStack) == 0x40);
+
+	struct UiState
+	{
+		std::uint32_t seq;
+		std::uint32_t flags;     // UiFlags
+		std::uint32_t selected;  // hotbar slot, 0..8
+		std::uint32_t pad0C;
+		std::uint64_t mcFrame;
+		std::uint64_t pad18;
+		UiStack       stacks[kUiStacks];
+	};
+	static_assert(sizeof(UiState) == 0x20 + 0x40 * kUiStacks);
+
+	// ---- inventory input @0xE000 (Minecraft -> guest, SPSC ring as above) --------------------
+	// While the inventory is open Minecraft shows nothing of its own and passes the mouse and
+	// keys on. Positions are fractions of the screen (0..1, top-left origin).
+	inline constexpr std::uint64_t kOffUiInputRing = 0xE000;
+	inline constexpr std::uint32_t kUiInputEntries = 128;
+
+	enum UiInputKind : std::uint16_t
+	{
+		kUiInMove = 1,
+		kUiInButtonDown = 2,  // code: 0 left, 1 right
+		kUiInButtonUp = 3,
+		kUiInKeyDown = 4,     // code: 1..9 for the number keys
+		kUiInKeyUp = 5,
+	};
+
+	enum UiModifiers : std::uint16_t
+	{
+		kUiModShift = 1u << 0,
+		kUiModCtrl = 1u << 1,
+	};
+
+	struct UiInput
+	{
+		std::uint16_t kind;
+		std::uint16_t code;
+		std::uint16_t mods;  // UiModifiers held at the time
+		std::uint16_t pad;
+		float         x, y;
+	};
+	static_assert(sizeof(UiInput) == 0x10);
+
+	// ---- inventory clicks @0xF000 (guest -> Minecraft, SPSC ring as above) -------------------
+	// What the player did on the guest's inventory screen, for Minecraft to apply with vanilla's
+	// container rules. Slots are stack indices as in UiState (0..45).
+	inline constexpr std::uint64_t kOffUiClickRing = 0xF000;
+	inline constexpr std::uint32_t kUiClickEntries = 64;
+
+	enum UiClickKind : std::uint32_t
+	{
+		kUiClickSlot = 1,     // slot; right; shift moves the stack across
+		kUiClickOutside = 2,  // throws the carried stack (right: one of it)
+		kUiClickGather = 3,   // double click: gathers matching stacks onto the carried one, at slot
+		kUiClickSwap = 4,     // number key over slot: swaps it with hotbar slot `hotbar`
+		kUiClickSpread = 5,   // drag with a carried stack across spreadMask's inventory slots
+	};
+
+	enum UiClickFlags : std::uint32_t
+	{
+		kUiClickRight = 1u << 0,
+		kUiClickShift = 1u << 1,
+	};
+
+	struct UiClick
+	{
+		std::uint32_t kind;  // UiClickKind
+		std::uint32_t slot;
+		std::uint32_t flags;  // UiClickFlags
+		std::uint32_t hotbar;
+		std::uint64_t spreadMask;  // bit i: inventory slot i (i < kUiInventorySlots)
+		std::uint64_t pad;
+	};
+	static_assert(sizeof(UiClick) == 0x20);
+
 	static_assert(kOffShotRing + kRingDataOff + kShotRingEntries * sizeof(Shot) <= kOffHitRing);
-	static_assert(kOffHitRing + kRingDataOff + kHitRingEntries * sizeof(Hit) <= kOffOverlayPixels);
+	static_assert(kOffHitRing + kRingDataOff + kHitRingEntries * sizeof(Hit) <= kOffUi);
+	static_assert(kOffUi + sizeof(UiState) <= kOffUiInputRing);
+	static_assert(kOffUiInputRing + kRingDataOff + kUiInputEntries * sizeof(UiInput) <= kOffUiClickRing);
+	static_assert(kOffUiClickRing + kRingDataOff + kUiClickEntries * sizeof(UiClick) <= kOffOverlayPixels);
 }
