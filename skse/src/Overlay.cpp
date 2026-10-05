@@ -16,6 +16,7 @@ namespace skycraft
 			ID3D11Texture2D*          texture = nullptr;
 			ID3D11ShaderResourceView* srv = nullptr;
 			UINT                      w = 0, h = 0;
+			DXGI_FORMAT               format = DXGI_FORMAT_R8G8B8A8_UNORM;
 			bool                      haveFrame = false;
 		};
 
@@ -178,9 +179,9 @@ float4 PSMain(VSOut i) : SV_Target {
 			return ok;
 		}
 
-		bool EnsureTexture(Layer& a_layer, UINT a_w, UINT a_h)
+		bool EnsureTexture(Layer& a_layer, UINT a_w, UINT a_h, DXGI_FORMAT a_format)
 		{
-			if (a_layer.texture && a_layer.w == a_w && a_layer.h == a_h) {
+			if (a_layer.texture && a_layer.w == a_w && a_layer.h == a_h && a_layer.format == a_format) {
 				return true;
 			}
 			SafeRelease(a_layer.srv);
@@ -190,7 +191,7 @@ float4 PSMain(VSOut i) : SV_Target {
 			td.Height = a_h;
 			td.MipLevels = 1;
 			td.ArraySize = 1;
-			td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			td.Format = a_format;
 			td.SampleDesc.Count = 1;
 			td.Usage = D3D11_USAGE_DYNAMIC;
 			td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
@@ -201,14 +202,15 @@ float4 PSMain(VSOut i) : SV_Target {
 			}
 			a_layer.w = a_w;
 			a_layer.h = a_h;
-			logger::info("{} texture {}x{}", a_layer.name, a_w, a_h);
+			a_layer.format = a_format;
+			logger::info("{} texture {}x{}{}", a_layer.name, a_w, a_h, a_format == DXGI_FORMAT_B8G8R8A8_UNORM ? " BGRA" : "");
 			return true;
 		}
 
-		// Copies a frame (RGBA8, top-down rows of width * 4 bytes) into the layer's texture.
-		bool Upload(Layer& a_layer, const std::uint8_t* a_src, UINT a_w, UINT a_h, UINT a_maxW, UINT a_maxH)
+		// Copies a frame (RGBA8 or BGRA8, top-down rows of width * 4 bytes) into the layer's texture.
+		bool Upload(Layer& a_layer, const std::uint8_t* a_src, UINT a_w, UINT a_h, UINT a_maxW, UINT a_maxH, DXGI_FORMAT a_format = DXGI_FORMAT_R8G8B8A8_UNORM)
 		{
-			if (a_w == 0 || a_h == 0 || a_w > a_maxW || a_h > a_maxH || !EnsureTexture(a_layer, a_w, a_h)) {
+			if (a_w == 0 || a_h == 0 || a_w > a_maxW || a_h > a_maxH || !EnsureTexture(a_layer, a_w, a_h, a_format)) {
 				return false;
 			}
 			D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -247,7 +249,9 @@ float4 PSMain(VSOut i) : SV_Target {
 				return;
 			}
 			const auto* hdr = Mw2::FrontHeader();
-			Upload(mw2Layer, Mw2::FrontPixels(), hdr->width, hdr->height, mw2::kMaxOverlayW, mw2::kMaxOverlayH);
+			// The guest renders BGRA; taking it as it is spares it a swizzle of every pixel.
+			const auto format = (hdr->flags & mw2::kOverlayBgra) ? DXGI_FORMAT_B8G8R8A8_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
+			Upload(mw2Layer, Mw2::FrontPixels(), hdr->width, hdr->height, mw2::kMaxOverlayW, mw2::kMaxOverlayH, format);
 		}
 
 		void DrawOverlay(IDXGISwapChain* a_swapChain)

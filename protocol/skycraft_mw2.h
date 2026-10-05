@@ -16,7 +16,7 @@
 namespace skycraft::mw2
 {
 	inline constexpr std::uint32_t kMagic = 0x4732574D;  // "MW2G"
-	inline constexpr std::uint32_t kVersion = 2;
+	inline constexpr std::uint32_t kVersion = 3;
 	inline constexpr wchar_t       kMappingName[] = L"Local\\SkyCraft_MW2_v1";
 
 	// ---- region offsets ---------------------------------------------------------------------
@@ -40,7 +40,7 @@ namespace skycraft::mw2
 		std::uint32_t magic;
 		std::uint32_t version;
 		std::uint32_t guestPid;
-		std::uint32_t pad0C;
+		std::uint32_t hostFrame;         // Skyrim's frames, counted in Present: the guest renders one per frame
 		std::uint64_t hostHeartbeatMs;   // GetTickCount64() at the last Skyrim frame
 		std::uint64_t guestHeartbeatMs;  // GetTickCount64() at the last guest frame
 		std::uint32_t viewportW;         // what the guest renders at: Skyrim's back buffer
@@ -99,14 +99,17 @@ namespace skycraft::mw2
 		float         fovScale;     // multiply Minecraft's FOV by this (ADS zoom); 1 = unchanged
 		float         spread;       // current hip spread, degrees
 		std::uint64_t guestFrame;
+		float         hotbarTop;    // top of the guest's hotbar, a fraction of the screen's height (0: not shown)
+		std::uint32_t pad2C;
 	};
-	static_assert(sizeof(State) == 0x28);
+	static_assert(sizeof(State) == 0x30);
 
 	// ---- overlay triple buffer @0x300 (guest -> Skyrim) -------------------------------------
 	// Same scheme as the main protocol's overlay: state bits 0-1 = middle slot, bit 2 = dirty.
-	// Pixels are RGBA8 with premultiplied alpha (blend ONE, INV_SRC_ALPHA, like the main overlay),
-	// top-down rows of width * 4 bytes.
+	// Pixels are RGBA8 (BGRA8 with kOverlayBgra) with premultiplied alpha (blend ONE,
+	// INV_SRC_ALPHA, like the main overlay), top-down rows of width * 4 bytes.
 	inline constexpr std::uint32_t kOverlayDirty = 1u << 2;
+	inline constexpr std::uint32_t kOverlayBgra = 1u << 0;  // OverlaySlotHdr::flags
 
 	struct OverlayCtl
 	{
@@ -119,7 +122,7 @@ namespace skycraft::mw2
 	{
 		std::uint32_t width;
 		std::uint32_t height;
-		std::uint32_t flags;  // reserved
+		std::uint32_t flags;  // kOverlayBgra
 		std::uint32_t pad;
 		std::uint64_t frameId;
 		std::uint8_t  reserved[0x40 - 0x18];

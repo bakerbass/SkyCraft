@@ -24,7 +24,7 @@ import time
 from fake_skyrim import save_png
 
 MAGIC = 0x4732574D
-VERSION = 2
+VERSION = 3
 NAME = "Local\\SkyCraft_MW2_v1"
 OFF_OVL = 0x300
 OFF_OVL_HDR = 0x340
@@ -133,6 +133,13 @@ class Mw2Link:
     def heartbeat(self):
         # GetTickCount64, as Skyrim writes it: the guest compares it with its own clock.
         struct.pack_into("<Q", self.m, 0x10, _tick())
+        # Skyrim's frame counter: the guest renders one frame per tick of it.
+        frame, = struct.unpack_from("<I", self.m, 0x0C)
+        struct.pack_into("<I", self.m, 0x0C, (frame + 1) & 0xFFFFFFFF)
+
+    def hotbar_top(self):
+        top, = struct.unpack_from("<f", self.m, 0x228)
+        return top
 
     def write_ui(self, selected, open_):
         """Minecraft's inventory snapshot, under its seqlock."""
@@ -181,9 +188,14 @@ class Mw2Link:
             return None
         struct.pack_into("<I", self.m, OFF_OVL, self.front)
         self.front = state & 3
-        w, h, _flags, _pad, frame = struct.unpack_from("<IIIIQ", self.m, OFF_OVL_HDR + self.front * 0x40)
+        w, h, flags, _pad, frame = struct.unpack_from("<IIIIQ", self.m, OFF_OVL_HDR + self.front * 0x40)
         start = OFF_PIX + self.front * SLOT
-        return w, h, frame, bytes(self.m[start:start + w * h * 4])
+        pixels = bytes(self.m[start:start + w * h * 4])
+        if flags & 1:  # BGRA, as the guest renders it
+            import numpy
+            px = numpy.frombuffer(pixels, numpy.uint8).reshape(-1, 4)
+            pixels = px[:, [2, 1, 0, 3]].tobytes()
+        return w, h, frame, pixels
 
 
 def gun_top(frame):
@@ -258,7 +270,7 @@ def main():
                     w, h, _, rgba = last
                     stem = out[:-4] if out.endswith(".png") else out
                     save_png(f"{stem}-{name}.png", w, h, rgba, False)
-                    print(f"inventory {name}: saved {stem}-{name}.png")
+                    print(f"inventory {name}: saved {stem}-{name}.png (hotbar top at {link.hotbar_top():.3f} of the height)")
                 ui_phase, ui_start = ui_phase + 1, None
                 if ui_phase == len(UI_PHASES):
                     link.write_ui(0, False)

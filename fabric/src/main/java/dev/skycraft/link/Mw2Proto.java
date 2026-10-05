@@ -8,7 +8,7 @@ public final class Mw2Proto {
 	}
 
 	public static final int MAGIC = 0x4732574D; // "MW2G"
-	public static final int VERSION = 2;
+	public static final int VERSION = 3;
 	public static final String MAPPING_NAME = "Local\\SkyCraft_MW2_v1";
 
 	// Header
@@ -29,7 +29,7 @@ public final class Mw2Proto {
 
 	// State (guest -> Minecraft, seqlock)
 	public static final long OFF_STATE = 0x200;
-	public static final long ST_SEQ = 0x00, ST_FLAGS = 0x04;
+	public static final long ST_SEQ = 0x00, ST_FLAGS = 0x04, ST_HOTBAR_TOP = 0x28;
 	public static final int ST_READY = 1;
 
 	// SPSC rings: head (writer) at +0x00, tail (reader) at +0x40, entries from +0x80.

@@ -256,7 +256,8 @@ namespace skycraft::Mw2
 		const auto h = std::min(static_cast<std::uint32_t>(a_backBufferH * renderScale + 0.5f), mw2::kMaxOverlayH);
 		Atomic(Header()->viewportW).store(w, std::memory_order_relaxed);
 		Atomic(Header()->viewportH).store(h, std::memory_order_relaxed);
-		Atomic(Header()->hostHeartbeatMs).store(::GetTickCount64(), std::memory_order_release);
+		Atomic(Header()->hostHeartbeatMs).store(::GetTickCount64(), std::memory_order_relaxed);
+		Atomic(Header()->hostFrame).fetch_add(1, std::memory_order_release);
 	}
 
 	bool AcquireOverlayFrame()

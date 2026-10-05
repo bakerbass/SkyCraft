@@ -45,6 +45,7 @@ public final class Mw2Link {
 	private static long lastAttempt;
 	private static int session;
 	private static int warnedVersion = -1;
+	private static float hotbarTop;
 
 	private Mw2Link() {
 	}
@@ -133,12 +134,19 @@ public final class Mw2Link {
 				continue;
 			}
 			int flags = s.get(JAVA_INT, OFF_STATE + ST_FLAGS);
+			float top = s.get(JAVA_FLOAT, OFF_STATE + ST_HOTBAR_TOP);
 			VarHandle.loadLoadFence();
 			if ((int) INT.getAcquire(s, OFF_STATE + ST_SEQ) == seq) {
+				hotbarTop = top;
 				return (flags & ST_READY) != 0;
 			}
 		}
 		return false;
+	}
+
+	/** Where the guest's hotbar starts, as a fraction of the screen's height (0: not shown), as of guestReady. */
+	public static float hotbarTop() {
+		return hotbarTop;
 	}
 
 	/** The gun in Minecraft's hand (WEAPON_*) and the buttons held for it. */
