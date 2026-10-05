@@ -79,8 +79,8 @@ lines. Commit in small, meaningful steps.
 Already done for you on this machine, as far as I could take it:
 - `skse/extern/CommonLibSSE-NG` is checked out at v10.0.0, with its `openvr` submodule.
 - `.tools/vcpkg` is cloned and bootstrapped.
-- A baseline build was running as I wrote this; the build log section at the end of this file
-  gives its result.
+- The baseline build succeeds and deploys (log at the end of this file). It is **not yet run
+  in game**.
 
 ```powershell
 cd SkyCraft\skse
@@ -243,4 +243,10 @@ sprint pose when sprinting in Minecraft. Then take a screenshot.
 
 ## Baseline build log
 
-_Updated when the S1 baseline build finishes; see below._
+2026-10-04, on branch `mw2` before any SKSE changes:
+- vcpkg bootstrap, `cmake --preset default` and `cmake --build --preset release` all exit 0.
+- **What was built:** `skse\build\RelWithDebInfo\SkyCraft.dll` (4,040,192 bytes) and its PDB.
+- **Where it went:** both were deployed to the MO2 mod folder, replacing the release DLL, which is
+  kept as `SkyCraft.dll.release-0.1.2`.
+- **Not yet run in game.** The first in-game check of S1 is still to do. If it misbehaves, restore
+  the release DLL and compare.
