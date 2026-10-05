@@ -94,14 +94,52 @@ flat level per cell, so a stream or pool anywhere in a cell made its lower dry g
 - The cell height is used only when Skyrim reports no surfaces at all.
 - `SkyCraft.log` logs `water: N placed water surfaces loaded` when the count changes.
 
-**To verify:**
-- No swimming on Whiterun's dry streets.
-- Still swimming in its stream and in the White River outside.
+**In game (2026-10-05): better, not fixed.** Random swimming is rarer but still happens in Whiterun.
+Don't change the code until the diagnostics below say which surface floods.
 
-**If something's off:**
-- **Surfaces at the wrong height:** use `TESWaterObject::plane` instead of the bound centre.
-- **Footprints too big** (the circle of a square plane reaches past its corners): use the shape's
-  triangles.
+**What the logs show** (`SkyCraft.log`, 00:17–00:19):
+- **Many surfaces:** 77–103 placed water "surfaces" are counted around Whiterun. The log counts
+  patches: one per multibound AABB, or one bounding circle per object without AABBs.
+- **The count keeps changing:** it moves every few seconds, even within one area (for example
+  78 → 80 → 79 → 78). Water objects come and go as the view moves (culling, LOD or distant water).
+  A column's water can flicker, which reads as "random".
+- **No location:** neither Skyrim's nor Minecraft's log says where the player was when swimming,
+  so the offending surface can't be identified yet.
+
+**Suspects, most likely first:**
+1. **Cell planes are back:** `TESWaterSystem::waterObjects` probably includes the flat water planes
+   Skyrim builds from each cell's water height (exterior cells flagged `kHasWater`, and the
+   `WhiterunWorld` default). That brings back the old one-level-per-cell flood through objects.
+   Check each object's `waterType` (editor id) and whether its plane covers a whole cell (4096
+   units).
+2. **Circles reach too far:** objects without multibounds use the shape's bounding sphere, whose
+   radius is half the plane's diagonal. For a cell-sized square that reaches about 40% past each
+   edge, onto neighbouring dry cells.
+3. **Waterfalls and sloped water:** the height is the bound centre's z. For a non-flat shape that's
+   mid-height, so the water reads too high on its lower part. `TESWaterObject::plane` (normal,
+   constant) would give the real level for flat ones.
+4. **Flicker:** objects that drop out of the list for a frame leave a column alternately wet and dry.
+   Holding a surface for about a second after it disappears would hide that, but find the cause
+   first.
+
+**Diagnostics to add next (temporary, behind `[Debug] bDiagnostics`):** when Minecraft's player is
+in Skyrim water but Skyrim's player isn't, log the column once.
+- **Minecraft side:** the player is in water when `SkyWater.depthIn` > 0 at the feet. Report it back
+  through a Minecraft → Skyrim event, or have Skyrim compute it from the grid it just wrote.
+- **Skyrim side:** "isn't" means `RE::Actor::IsSwimming()` is false, or the water height is below
+  Skyrim's land height there.
+- **The log line:**
+  - the player's Skyrim position, the cell's editor id, its `kHasWater` flag and `GetWaterHeight`;
+  - every patch covering the column: height, centre, extents, AABB or circle, the object's
+    `waterType` editor id, `flags`, and the shape's name.
+
+Then compare with where water visibly is. Expected fix: skip the cell-level planes (or require a
+`waterType` that isn't the worldspace default), use the shape's triangles instead of its bounding
+circle, and use the plane's level for flat water.
+
+**Separately, firing in the same run looked right:**
+- A sniper headshot on a level-20 Whiterun Guard: 56 Minecraft → 560 Skyrim, critical, stagger.
+- UMP/SPAS hits: 8–11 Minecraft → 80–112 Skyrim.
 
 ## 3. Skyrim saves ↔ Minecraft state (feature)
 
