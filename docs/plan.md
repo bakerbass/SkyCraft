@@ -77,40 +77,31 @@ final frame, with both layers, as `skycraft_capture.png` next to it.
   - `skycraft-0.1.2.jar.release` (Prism `mods`)
 - **The live `SkyCraft.ini`:** has `[MW2] bEnable = 1`. The original is `SkyCraft.ini.before-mw2`.
 
-## 1. Verify firing and ADS in game (next session, first)
+## 1. Firing and ADS in game ✓
 
-Not yet seen in game. Whiterun works; Nazeem is a fine target. Check:
+Verified in game 2026-10-05 (Whiterun; Nazeem). Damage tuning lives in `fabric/.../mw2/Mw2Guns.java`
+(`MW2_TO_MC_DAMAGE`, `HEAD_SHARE`).
 
-- **Left click:** fires without swinging Minecraft's arm.
-- **Right click:** zooms Skyrim's actual view, and the scope overlay covers the whole screen. It
-  covered only the top ⅔ before `d87aed6`: the HUD was laid out at the hidden window's size, now
-  at the image's.
-- **Hits:** the target takes damage, staggers on heavy shots, and the hitmarker and its sound play.
-  Crime and aggro come through Skyrim's normal hit path.
-- **F5:** no first-person gun.
+## 2. Random water in Whiterun (fix built, verify in game)
 
-If damage doesn't land:
-- Minecraft's log should show `SkyCraft: hit <name> for <n>` per tick of hits.
-- In the guest's log, look for `shot ring is full`.
+**Cause:** `skse/src/Game.cpp` `WriteWaterGrid` asked each column's cell `GetWaterHeight`. That is one
+flat level per cell, so a stream or pool anywhere in a cell made its lower dry ground read as water.
 
-Damage: an Intervention torso shot is 105 in MW2 terms ÷ 5 = 21 Minecraft, which comes to about
-160 Skyrim damage on a level-10 NPC. All in `fabric/.../mw2/Mw2Guns.java` (`MW2_TO_MC_DAMAGE`).
+**Fix (commit after `06983f6`):** the grid now comes from Skyrim's placed water surfaces
+(`RE::TESWaterSystem::waterObjects`).
+- Each surface's height is its plane mesh's bound centre z.
+- Its footprint is its multibound AABBs, or else its bounding circle.
+- The cell height is used only when Skyrim reports no surfaces at all.
+- `SkyCraft.log` logs `water: N placed water surfaces loaded` when the count changes.
 
-## 2. Random water in Whiterun (bug)
+**To verify:**
+- No swimming on Whiterun's dry streets.
+- Still swimming in its stream and in the White River outside.
 
-**Symptom:** the player swims in places with no water.
-
-**Likely cause:** `skse/src/Game.cpp` `WriteWaterGrid` asks each column's cell
-`TESObjectCELL::GetWaterHeight`. That is one flat water level per cell. A cell with any water in it
-(a stream, the Gildergreen pool) reports that level across the whole cell, so dry ground lower in
-that cell reads as under water. Minecraft (`fabric/.../world/SkyWater.java`) then swims the player.
-
-**Fix:**
-- **Quick:** sample only where Skyrim's own water is. Query the water objects of
-  `RE::TESWaterSystem` (their placed planes and bounds) instead of the cell height.
-- **Or:** ray down from the water height and require the water plane's reference near the column.
-- **Before that, confirm:** log the cell, its water height and `cellFlags` (`kHasWater`) where it
-  happens.
+**If something's off:**
+- **Surfaces at the wrong height:** use `TESWaterObject::plane` instead of the bound centre.
+- **Footprints too big** (the circle of a square plane reaches past its corners): use the shape's
+  triangles.
 
 ## 3. Skyrim saves ↔ Minecraft state (feature)
 

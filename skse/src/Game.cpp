@@ -304,6 +304,40 @@ namespace skycraft
 			if (!tes || !cell) {
 				return;
 			}
+			// Skyrim's water as it is placed: each surface's height and where it reaches. A cell's
+			// own water height is one level for the whole cell, so a stream or a pool in it (as in
+			// Whiterun) made dry ground lower in that cell read as under water.
+			struct Patch
+			{
+				float h, cx, cy, ex, ey;  // height; centre; half extents (ey < 0: a circle of radius ex)
+			};
+			static std::vector<Patch> patches;
+			patches.clear();
+			if (auto* water = RE::TESWaterSystem::GetSingleton()) {
+				for (auto& object : water->waterObjects) {
+					if (!object || !object->shape) {
+						continue;
+					}
+					const auto& bound = object->shape->worldBound;
+					const float h = bound.center.z;
+					if (!object->multiBounds.empty()) {
+						for (auto& box : object->multiBounds) {
+							if (box) {
+								patches.push_back({ h, box->center.x, box->center.y, std::abs(box->size.x), std::abs(box->size.y) });
+							}
+						}
+					} else if (bound.radius > 0.0f) {
+						patches.push_back({ h, bound.center.x, bound.center.y, bound.radius, -1.0f });
+					}
+				}
+			}
+			const bool placedWater = !patches.empty();
+			static std::size_t loggedPatches = SIZE_MAX;
+			if (patches.size() != loggedPatches) {
+				loggedPatches = patches.size();
+				logger::info("water: {} placed water surfaces loaded{}", patches.size(), placedWater ? "" : " (using cell water heights)");
+			}
+
 			static proto::WaterGrid grid{};
 			constexpr int kSize = int(proto::kWaterGridSize);
 			grid.originX = int(std::floor(a_centre.x)) - kSize / 2;
@@ -314,12 +348,23 @@ namespace skycraft
 				for (int dx = 0; dx < kSize; ++dx) {
 					auto pos = McToSky(grid.originX + dx + 0.5, a_centre.y, grid.originZ + dz + 0.5);
 					pos.z = probeZ;
-					// The cell under that column (the player's own inside); TES::GetWaterHeight isn't
-					// in 1.7.104's address library, the cell's own lookup is.
-					auto* columnCell = cell->IsInteriorCell() ? cell : tes->GetCell(pos);
 					float h = -std::numeric_limits<float>::max();
-					if (columnCell) {
-						columnCell->GetWaterHeight(pos, h);
+					if (placedWater) {
+						for (const auto& w : patches) {
+							const float dx = pos.x - w.cx, dy = pos.y - w.cy;
+							const bool over = w.ey < 0.0f ? dx * dx + dy * dy <= w.ex * w.ex : std::abs(dx) <= w.ex && std::abs(dy) <= w.ey;
+							if (over && w.h > h) {
+								h = w.h;
+							}
+						}
+					} else {
+						// No placed surfaces known: the cell under that column (the player's own
+						// inside); TES::GetWaterHeight isn't in 1.7.104's address library, the cell's
+						// own lookup is.
+						auto* columnCell = cell->IsInteriorCell() ? cell : tes->GetCell(pos);
+						if (columnCell) {
+							columnCell->GetWaterHeight(pos, h);
+						}
 					}
 					// No water reads as a huge negative height (or NaN).
 					grid.surface[dz * kSize + dx] = (std::isfinite(h) && h > -1.0e6f) ? float(h / proto::kUnitsPerBlock) : proto::kNoWater;
