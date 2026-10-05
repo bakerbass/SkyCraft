@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Link.h"
+#include "skycraft_mw2.h"
 
 namespace skycraft
 {
@@ -91,6 +92,30 @@ namespace skycraft
 		bool MinecraftRunning();
 		// Prism Launcher is running (downloading, waiting on a sign-in or showing an error).
 		bool PrismRunning();
+		// Runs a program as if double-clicked, started by the desktop's Explorer: outside Mod
+		// Organizer's virtual files and its list of processes to wait for. False if Explorer
+		// couldn't be asked. Call from a thread that may initialize COM.
+		bool OpenFromDesktop(const std::wstring& a_file, const std::wstring& a_args, const std::wstring& a_dir, int a_show);
+	}
+
+	// MW2's guns (docs/MW2.md): the IW4L guest draws the gun and HUD into Local\SkyCraft_MW2_v1;
+	// Skyrim owns that mapping, starts and stops the guest, and composites its layer.
+	namespace Mw2
+	{
+		// kDataLoaded: if [MW2] bEnable, creates the mapping and starts the guest.
+		void Install();
+		[[nodiscard]] bool Enabled();
+		// The guest wrote its heartbeat in the last few seconds.
+		[[nodiscard]] bool GuestAlive();
+		// The guest's soldier is spawned (State.flags & kStReady).
+		[[nodiscard]] bool Ready();
+		// Present, every frame: the size to render at (Skyrim's back buffer) and Skyrim's heartbeat.
+		void WriteHeader(std::uint32_t a_backBufferW, std::uint32_t a_backBufferH);
+
+		// Overlay triple buffer (consumer side), as Link's.
+		bool                                       AcquireOverlayFrame();
+		[[nodiscard]] const std::uint8_t*          FrontPixels();
+		[[nodiscard]] const mw2::OverlaySlotHdr*   FrontHeader();
 	}
 
 	namespace Input

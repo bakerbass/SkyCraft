@@ -33,6 +33,7 @@ namespace
 			skycraft::PathAvoid::Install();
 			skycraft::Dig::Install();
 			skycraft::CrashLog::Install();
+			skycraft::Mw2::Install();
 			break;
 		case SKSE::MessagingInterface::kPostLoadGame:
 		case SKSE::MessagingInterface::kNewGame:
