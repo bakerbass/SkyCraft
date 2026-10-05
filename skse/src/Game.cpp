@@ -4,6 +4,10 @@
 #include "Dig.h"
 #include "Perf.h"
 
+#include <SimpleIni.h>
+
+#include <format>
+
 namespace skycraft
 {
 	Runtime& State()
@@ -297,6 +301,9 @@ namespace skycraft
 
 		// Skyrim's water surface over the block columns around Minecraft's player, so Minecraft
 		// swims, floats and drowns in Skyrim's lakes and rivers.
+		template <class P>
+		void LogWetColumn(RE::PlayerCharacter* a_player, RE::TESObjectCELL* a_cell, const std::vector<P>& a_patches, bool a_placed);
+
 		void WriteWaterGrid(RE::PlayerCharacter* a_player, const McVec& a_centre, std::uint32_t a_worldId)
 		{
 			auto* tes = RE::TES::GetSingleton();
@@ -309,7 +316,8 @@ namespace skycraft
 			// Whiterun) made dry ground lower in that cell read as under water.
 			struct Patch
 			{
-				float h, cx, cy, ex, ey;  // height; centre; half extents (ey < 0: a circle of radius ex)
+				float                       h, cx, cy, ex, ey;  // height; centre; half extents (ey < 0: a circle of radius ex)
+				const RE::TESWaterObject*   object;
 			};
 			static std::vector<Patch> patches;
 			patches.clear();
@@ -323,11 +331,11 @@ namespace skycraft
 					if (!object->multiBounds.empty()) {
 						for (auto& box : object->multiBounds) {
 							if (box) {
-								patches.push_back({ h, box->center.x, box->center.y, std::abs(box->size.x), std::abs(box->size.y) });
+								patches.push_back({ h, box->center.x, box->center.y, std::abs(box->size.x), std::abs(box->size.y), object.get() });
 							}
 						}
 					} else if (bound.radius > 0.0f) {
-						patches.push_back({ h, bound.center.x, bound.center.y, bound.radius, -1.0f });
+						patches.push_back({ h, bound.center.x, bound.center.y, bound.radius, -1.0f, object.get() });
 					}
 				}
 			}
@@ -371,6 +379,65 @@ namespace skycraft
 				}
 			}
 			Link::Get().WriteWaterGrid(grid);
+			LogWetColumn(a_player, cell, patches, placedWater);
+		}
+
+		// SkyCraft.ini [Debug] bWaterDiagnostics: when the water Minecraft gets rises over the
+		// player's feet, log that spot once, with every placed water surface covering it, to find
+		// which one floods dry ground (docs/plan.md §2).
+		template <class P>
+		void LogWetColumn(RE::PlayerCharacter* a_player, RE::TESObjectCELL* a_cell, const std::vector<P>& a_patches, bool a_placed)
+		{
+			static const bool on = [] {
+				CSimpleIniA ini;
+				ini.SetUnicode();
+				ini.LoadFile("Data/SKSE/Plugins/SkyCraft.ini");
+				return ini.GetBoolValue("Debug", "bWaterDiagnostics", false);
+			}();
+			static bool        wasWet = false;
+			static RE::NiPoint3 lastLogged{ 1e30f, 1e30f, 1e30f };
+			if (!on) {
+				return;
+			}
+			const auto  pos = a_player->GetPosition();
+			float       top = -std::numeric_limits<float>::max();
+			std::string covering;
+			int         coverCount = 0;
+			for (const auto& w : a_patches) {
+				const float dx = pos.x - w.cx, dy = pos.y - w.cy;
+				const bool  over = w.ey < 0.0f ? dx * dx + dy * dy <= w.ex * w.ex : std::abs(dx) <= w.ex && std::abs(dy) <= w.ey;
+				if (!over) {
+					continue;
+				}
+				top = std::max(top, w.h);
+				const auto* object = w.object;
+				const auto* type = object ? object->waterType : nullptr;
+				++coverCount;
+				covering += std::format(" ;; h {:.0f} ({:+.0f} vs feet) {} centre ({:.0f}, {:.0f}) {} | plane n=({:.2f},{:.2f},{:.2f}) c={:.0f} | waterType {:08X} '{}' | flags {:02X} | shape '{}'",
+					w.h, w.h - pos.z, w.ey < 0.0f ? "circle" : "box", w.cx, w.cy,
+					w.ey < 0.0f ? std::format("r {:.0f}", w.ex) : std::format("half {:.0f} x {:.0f}", w.ex, w.ey),
+					object ? object->plane.normal.x : 0.0f, object ? object->plane.normal.y : 0.0f, object ? object->plane.normal.z : 0.0f,
+					object ? object->plane.constant : 0.0f, type ? type->GetFormID() : 0u, type ? type->GetFormEditorID() : "",
+					object ? object->flags : 0, object && object->shape ? object->shape->name.c_str() : "");
+			}
+			const bool wet = top > pos.z + 8.0f;  // over the ankles
+			const float moved = (pos - lastLogged).Length();
+			if (wet && (!wasWet || moved > 512.0f)) {
+				float cellWater = -std::numeric_limits<float>::max();
+				if (a_cell) {
+					a_cell->GetWaterHeight(pos, cellWater);
+				}
+				logger::info("water diag: wet at ({:.0f}, {:.0f}, {:.0f}) cell {:08X} '{}' hasWater {} cellWaterHeight {:.0f} swimming {} | {} of {} {} cover it:{}",
+					pos.x, pos.y, pos.z, a_cell ? a_cell->GetFormID() : 0u, a_cell ? a_cell->GetFormEditorID() : "",
+					a_cell && a_cell->cellFlags.any(RE::TESObjectCELL::Flag::kHasWater), cellWater, a_player->IsSwimming(),
+					coverCount, a_patches.size(),
+					a_placed ? "placed surfaces" : "(none placed: cell heights in use)", covering);
+				lastLogged = pos;
+			}
+			if (!wet && wasWet) {
+				logger::info("water diag: dry again at ({:.0f}, {:.0f}, {:.0f})", pos.x, pos.y, pos.z);
+			}
+			wasWet = wet;
 		}
 
 		// Hide Skyrim's HUD except the compass, the activation prompt and the enemy health bar

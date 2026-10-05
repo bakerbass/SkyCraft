@@ -122,7 +122,24 @@ Don't change the code until the diagnostics below say which surface floods.
    Holding a surface for about a second after it disappears would hide that, but find the cause
    first.
 
-**Diagnostics to add next (temporary, behind `[Debug] bDiagnostics`):** when Minecraft's player is
+**Diagnostics built (2026-10-05):** `[Debug] bWaterDiagnostics = 1` in `SkyCraft.ini`. It's on in the
+live MO2 ini and off in the repo's template; the code is in `skse/src/Game.cpp` `LogWetColumn`.
+
+Whenever the water Minecraft is given rises over the player's feet, `SkyCraft.log` gets one line:
+
+```
+water diag: wet at (x, y, z) cell <id> '<edid>' hasWater <b> cellWaterHeight <h> swimming <b> | N of M placed surfaces cover it: ;; h <height> (<+/- vs feet>) box|circle centre (x, y) half WxH|r R | plane n=(...) c=<constant> | waterType <id> '<edid>' | flags <xx> | shape '<name>' ;; ...
+```
+
+It logs again after moving about 7 blocks while still wet, and logs `water diag: dry again` on
+leaving the water.
+
+**To diagnose:** walk Whiterun's dry streets until it swims you, then read those lines. The patch
+with the highest `h` is the one flooding. Its kind (circle or box), `waterType`, shape name and
+`plane` show which suspect below it is. Compare `swimming` (Skyrim's own idea) and
+`cellWaterHeight`.
+
+**Original plan for the diagnostics (now built as above):** when Minecraft's player is
 in Skyrim water but Skyrim's player isn't, log the column once.
 - **Minecraft side:** the player is in water when `SkyWater.depthIn` > 0 at the feet. Report it back
   through a Minecraft → Skyrim event, or have Skyrim compute it from the grid it just wrote.
